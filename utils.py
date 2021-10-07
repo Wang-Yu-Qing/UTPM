@@ -18,6 +18,8 @@ def extract_movie_tag_relation(filepath, top=10):
             line = line.strip()
             splitted = line.split(",")
             movie_id, tag_id, score = splitted[0], splitted[1], float(splitted[2])
+	    # use 0 as padding tag_id value
+	    tag_id += 1
             if last_movie_id is not None and movie_id != last_movie_id:
                 extract_tags(tag_scores, movie_tag_rel, last_movie_id, top)
             tag_scores.append((tag_id, score))
@@ -29,7 +31,7 @@ def extract_movie_tag_relation(filepath, top=10):
 
 
 def extract_movie_cate_relation(filepath):
-    cate_encoder, cate_decoder, cate_id = {}, [], 0
+    cate_encoder, cate_decoder, cate_id = {}, [], 1
     movie_cate_rel = {}
     with open(filepath, "r", encoding="utf-8") as f:
         f.readline()
@@ -49,7 +51,7 @@ def extract_movie_cate_relation(filepath):
             movie_cate_rel[movie_id] = cates_encoded
     
     return movie_cate_rel, cate_encoder, cate_decoder
-            
+
 
 def extract_user_behaviors(filepath):
     user_behaviors = {}
@@ -68,14 +70,13 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
-    print("pos: {}, neg: {}".format(pos, neg)) 
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
         # and last 20% as label
         behavior_sorted = sorted(behavior, key=lambda x: x[2])
         pivot = int(len(behavior) * 0.8)
-        X, Y = behavior[:pivot], behavior[pivot:]
+        X, Y = behavior_sorted[:pivot], behavior_sorted[pivot:]
         user_behaviors[user_id] = {"X": X, "Y": Y}
 
     return user_behaviors
@@ -93,6 +94,15 @@ def split_users(users):
     return train, test
 
 
+def pad_or_cut(seq, size):
+    if len(seq) < size:
+        seq += [0] * (size - len(seq))
+    elif len(seq) > size:
+        seq = random.choices(seq, k=size)
+
+    return seq
+
+
 def generate_user_samples(user_id, histories, futures, movie_tag_map, movie_cate_map, samples):
     # build features
     # list features no deduplicating
@@ -108,16 +118,25 @@ def generate_user_samples(user_id, histories, futures, movie_tag_map, movie_cate
         else:
             neg_tags += movie_tags
             neg_cates += movie_cates
+
+    # pos percentiles: [140. 240. 460. 980.]
+    # neg percentiles: [ 0. 10. 30. 70.]
+    pos_tags = pad_or_cut(pos_tags, 800)
+    neg_tags = pad_or_cut(neg_cates, 70)
+
     # each user has one X
     X = (user_id, pos_tags, neg_tags, pos_cates, neg_cates)
 
     # build labels, each user has multi Ys
+    Ys = []
     for movie_id, action, timestamp in futures:
         try:
             movie_tags = movie_tag_map[movie_id]
+            Ys.append((movie_tags, action))
         except KeyError:
             continue
-        samples.append([X, (movie_tags, action)])
+
+    samples.append([X, Ys])
 
 
 def generate_samples(train_users, test_users, user_behaviors, movie_tag_map, movie_cate_map):
@@ -139,6 +158,6 @@ def generate_samples(train_users, test_users, user_behaviors, movie_tag_map, mov
                               movie_tag_map, 
                               movie_cate_map, 
                               test_samples)
-    
+
     return train_samples, test_samples
  

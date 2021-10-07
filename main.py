@@ -1,4 +1,4 @@
-from numpy.lib.shape_base import split
+import numpy as np
 from utils import *
 
 
@@ -9,3 +9,4 @@ user_behaviors = extract_user_behaviors("data/ml-20m/ratings.csv")
 train_users, test_users = split_users(user_behaviors.keys())
 
 train_samples, test_samples = generate_samples(train_users, test_users, user_behaviors, movie_tag, movie_cate)
+
