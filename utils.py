@@ -17,9 +17,9 @@ def extract_movie_tag_relation(filepath, top=10):
         for line in f.readlines():
             line = line.strip()
             splitted = line.split(",")
-            movie_id, tag_id, score = splitted[0], splitted[1], float(splitted[2])
-	    # use 0 as padding tag_id value
-	    tag_id += 1
+            movie_id, tag_id, score = splitted[0], int(splitted[1]), float(splitted[2])
+            # use 0 as padding tag_id value
+            tag_id += 1
             if last_movie_id is not None and movie_id != last_movie_id:
                 extract_tags(tag_scores, movie_tag_rel, last_movie_id, top)
             tag_scores.append((tag_id, score))
@@ -161,3 +161,43 @@ def generate_samples(train_users, test_users, user_behaviors, movie_tag_map, mov
 
     return train_samples, test_samples
  
+
+def create_dateset(samples):
+    """
+        single feature(s): user_id
+        list features(s): history tags, history cates
+        
+        produce:
+            single feature batches
+            history tags batches
+            history cates batches
+
+    """
+    pass
+
+ 	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
