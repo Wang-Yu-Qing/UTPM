@@ -1,6 +1,7 @@
-import numpy as np
-from sklearn.model_selection import train_test_split
 import random
+import numpy as np
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
 
 
 def extract_tags(tag_scores, movie_tag_rel, last_movie_id, top):
@@ -61,7 +62,7 @@ def extract_user_behaviors(filepath):
         for line in f.readlines():
             line = line.strip()
             splitted = line.split(",")
-            user_id, movie_id, rating, timestamp = splitted[0], splitted[1], float(splitted[2]), int(splitted[3])
+            user_id, movie_id, rating, timestamp = int(splitted[0]), splitted[1], float(splitted[2]), int(splitted[3])
             if user_id not in user_behaviors:
                 user_behaviors[user_id] = []
             if rating <= 1.5:
@@ -103,7 +104,35 @@ def pad_or_cut(seq, size):
     return seq
 
 
-def generate_user_samples(user_id, histories, futures, movie_tag_map, movie_cate_map, samples):
+def _bytes_feature(value):
+    """Returns a bytes_list from a string / byte."""
+    if isinstance(value, type(tf.constant(0))): # if value ist tensor
+        value = value.numpy() # get value of tensor
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+
+def _int64_feature(value):
+  """Returns an int64_list from a bool / enum / int / uint."""
+  return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+
+def serialize_array(array):
+  array = tf.io.serialize_tensor(array)
+  return array
+
+def parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, target_movie_tags, label):
+  data = {
+        'user_id':  _int64_feature(user_id),
+        'pos_tags':  _bytes_feature(serialize_array(pos_tags)),
+        'neg_tags':  _bytes_feature(serialize_array(neg_tags)),
+        'pos_cates':  _bytes_feature(serialize_array(pos_cates)),
+        'neg_cates':  _bytes_feature(serialize_array(neg_cates)),
+        'target_movie_tags': _bytes_feature(serialize_array(target_movie_tags)),
+        'label':  _int64_feature(label)
+  }
+
+  return tf.train.Example(features=tf.train.Features(feature=data))
+
+
+def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate_map, samples, filepath):
     # build features
     # list features no deduplicating
     pos_tags, neg_tags, pos_cates, neg_cates = [], [], [], []
@@ -119,85 +148,57 @@ def generate_user_samples(user_id, histories, futures, movie_tag_map, movie_cate
             neg_tags += movie_tags
             neg_cates += movie_cates
 
-    # pos percentiles: [140. 240. 460. 980.]
-    # neg percentiles: [ 0. 10. 30. 70.]
+    # pos tag percentiles: [140. 240. 460. 980.]
+    # neg tag percentiles: [ 0. 10. 30. 70.]
     pos_tags = pad_or_cut(pos_tags, 800)
-    neg_tags = pad_or_cut(neg_cates, 70)
+    neg_tags = pad_or_cut(neg_tags, 70)
 
-    # each user has one X
-    X = (user_id, pos_tags, neg_tags, pos_cates, neg_cates)
+    # pos cate percentiles: [ 38.  67. 125. 269.]
+    # neg cate percentiles: [ 0.  3.  7. 18.]
+    pos_cates = pad_or_cut(pos_cates, 200)
+    neg_cates = pad_or_cut(neg_cates, 15)
 
     # build labels, each user has multi Ys
-    Ys = []
     for movie_id, action, timestamp in futures:
         try:
             movie_tags = movie_tag_map[movie_id]
-            Ys.append((movie_tags, action))
+            # process features of this sample
+            sample = parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, movie_tags, action)                
+            samples.append(sample.SerializeToString)
         except KeyError:
             continue
-
-    samples.append([X, Ys])
 
 
 def generate_samples(train_users, test_users, user_behaviors, movie_tag_map, movie_cate_map):
     train_samples, test_samples = [], []
     for user_id in train_users:
         histories, futures = user_behaviors[user_id]["X"], user_behaviors[user_id]['Y']
-        generate_user_samples(user_id, 
+        build_user_tf_records(user_id, 
                               histories, 
                               futures, 
                               movie_tag_map, 
                               movie_cate_map, 
-                              train_samples)
+                              train_samples,
+                              "train_samples.tfrecords")
 
     for user_id in test_users:
         histories, futures = user_behaviors[user_id]["X"], user_behaviors[user_id]['Y']
-        generate_user_samples(user_id, 
-                              histories, 
-                              futures, 
-                              movie_tag_map, 
-                              movie_cate_map, 
-                              test_samples)
+        build_user_tf_records(user_id,
+                              histories,
+                              futures,
+                              movie_tag_map,
+                              movie_cate_map,
+                              test_samples,
+                              "test_samples.tfrecords")
 
-    return train_samples, test_samples
+    with tf.io.TFRecordWriter('train_samples.tfrecords') as writer:
+        for sample in train_samples:
+            writer.write(sample)
+        
+        for sample in test_sampels:
+            writer.write(sample)
  
 
-def create_dateset(samples):
-    """
-        single feature(s): user_id
-        list features(s): history tags, history cates
         
-        produce:
-            single feature batches
-            history tags batches
-            history cates batches
-
-    """
-    pass
 
  	
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
