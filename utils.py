@@ -201,11 +201,11 @@ def write_tf_records(train_users, test_users, user_behaviors, movie_tag_map, mov
                               test_samples,
                               pad_value)
 
-    with tf.io.TFRecordWriter('train_samples.tfrecords') as writer:
+    with tf.io.TFRecordWriter('data/train_samples.tfrecords') as writer:
         for sample in train_samples:
             writer.write(sample)
         
-    with tf.io.TFRecordWriter('test_samples.tfrecords') as writer:
+    with tf.io.TFRecordWriter('data/test_samples.tfrecords') as writer:
         for sample in test_samples:
             writer.write(sample)
 
@@ -237,8 +237,8 @@ def decode_one_tfrecord(sample):
 
 
 def read_tf_records(batch_size):
-    train_dataset = tf.data.TFRecordDataset("train_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
-    test_dataset = tf.data.TFRecordDataset("test_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
+    train_dataset = tf.data.TFRecordDataset("data/train_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
+    test_dataset = tf.data.TFRecordDataset("data/test_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
 
     return train_dataset, test_dataset
     
