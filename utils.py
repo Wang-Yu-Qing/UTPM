@@ -12,6 +12,7 @@ def extract_tags(tag_scores, movie_tag_rel, last_movie_id, top):
 
 def extract_movie_tag_relation(filepath, top=10):
     movie_tag_rel = {}
+    max_tag_id = 0
     with open(filepath, "r") as f:
         f.readline()
         last_movie_id, tag_scores = None, []
@@ -19,19 +20,21 @@ def extract_movie_tag_relation(filepath, top=10):
             line = line.strip()
             splitted = line.split(",")
             movie_id, tag_id, score = splitted[0], int(splitted[1]), float(splitted[2])
-            # use 0 as padding tag_id value
+            # use 0 as padding value
             tag_id += 1
             if last_movie_id is not None and movie_id != last_movie_id:
                 extract_tags(tag_scores, movie_tag_rel, last_movie_id, top)
             tag_scores.append((tag_id, score))
             last_movie_id = movie_id
+            max_tag_id = max(max_tag_id, tag_id)
         
         extract_tags(tag_scores, movie_tag_rel, last_movie_id, top)
 
-    return movie_tag_rel
+    return movie_tag_rel, max_tag_id + 1
 
 
 def extract_movie_cate_relation(filepath):
+    # use 0 as padding value
     cate_encoder, cate_decoder, cate_id = {}, [], 1
     movie_cate_rel = {}
     with open(filepath, "r", encoding="utf-8") as f:
@@ -57,6 +60,8 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
+    # TODO: read full data
+    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -71,6 +76,10 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
+
+            i += 1
+            if i == 1000:
+                break
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -119,6 +128,7 @@ def serialize_array(array):
   return array
 
 def parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, target_movie_tags, label):
+  # TODO: change int in list features to int64
   data = {
         'user_id':  _int64_feature(user_id),
         'pos_tags':  _bytes_feature(serialize_array(pos_tags)),
@@ -132,7 +142,7 @@ def parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, targe
   return tf.train.Example(features=tf.train.Features(feature=data))
 
 
-def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate_map, samples, filepath):
+def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate_map, samples, pad_value):
     # build features
     # list features no deduplicating
     pos_tags, neg_tags, pos_cates, neg_cates = [], [], [], []
@@ -150,13 +160,13 @@ def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate
 
     # pos tag percentiles: [140. 240. 460. 980.]
     # neg tag percentiles: [ 0. 10. 30. 70.]
-    pos_tags = pad_or_cut(pos_tags, 800)
-    neg_tags = pad_or_cut(neg_tags, 70)
+    pos_tags = pad_or_cut(pos_tags, 800, pad_value)
+    neg_tags = pad_or_cut(neg_tags, 70, pad_value)
 
     # pos cate percentiles: [ 38.  67. 125. 269.]
     # neg cate percentiles: [ 0.  3.  7. 18.]
-    pos_cates = pad_or_cut(pos_cates, 200)
-    neg_cates = pad_or_cut(neg_cates, 15)
+    pos_cates = pad_or_cut(pos_cates, 200, pad_value)
+    neg_cates = pad_or_cut(neg_cates, 15, pad_value)
 
     # build labels, each user has multi Ys
     for movie_id, action, timestamp in futures:
@@ -164,12 +174,12 @@ def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate
             movie_tags = movie_tag_map[movie_id]
             # process features of this sample
             sample = parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, movie_tags, action)                
-            samples.append(sample.SerializeToString)
+            samples.append(sample.SerializeToString())
         except KeyError:
             continue
 
 
-def generate_samples(train_users, test_users, user_behaviors, movie_tag_map, movie_cate_map):
+def write_tf_records(train_users, test_users, user_behaviors, movie_tag_map, movie_cate_map, pad_value):
     train_samples, test_samples = [], []
     for user_id in train_users:
         histories, futures = user_behaviors[user_id]["X"], user_behaviors[user_id]['Y']
@@ -179,7 +189,7 @@ def generate_samples(train_users, test_users, user_behaviors, movie_tag_map, mov
                               movie_tag_map, 
                               movie_cate_map, 
                               train_samples,
-                              "train_samples.tfrecords")
+                              pad_value)
 
     for user_id in test_users:
         histories, futures = user_behaviors[user_id]["X"], user_behaviors[user_id]['Y']
@@ -189,16 +199,46 @@ def generate_samples(train_users, test_users, user_behaviors, movie_tag_map, mov
                               movie_tag_map,
                               movie_cate_map,
                               test_samples,
-                              "test_samples.tfrecords")
+                              pad_value)
 
     with tf.io.TFRecordWriter('train_samples.tfrecords') as writer:
         for sample in train_samples:
             writer.write(sample)
         
-        for sample in test_sampels:
+    with tf.io.TFRecordWriter('test_samples.tfrecords') as writer:
+        for sample in test_samples:
             writer.write(sample)
+
+    print("Tf records write done.")
  
 
-        
+def decode_one_tfrecord(sample):
+    data = {
+      'user_id': tf.io.FixedLenFeature([], tf.int64),
+      'pos_tags': tf.io.FixedLenFeature([], tf.string),
+      'neg_tags': tf.io.FixedLenFeature([], tf.string),
+      'pos_cates': tf.io.FixedLenFeature([], tf.string),
+      'neg_cates': tf.io.FixedLenFeature([], tf.string),
+      'target_movie_tags': tf.io.FixedLenFeature([], tf.string),
+      'label': tf.io.FixedLenFeature([], tf.int64)
+    }
 
- 	
+    sample = tf.io.parse_single_example(sample, data)
+
+    user_id = sample["user_id"]
+    pos_tags = tf.io.parse_tensor(sample["pos_tags"], out_type=tf.int32)
+    neg_tags = tf.io.parse_tensor(sample["neg_tags"], out_type=tf.int32)
+    pos_cates = tf.io.parse_tensor(sample["pos_cates"], out_type=tf.int32)
+    neg_cates = tf.io.parse_tensor(sample["neg_cates"], out_type=tf.int32)
+    target_movie_tags = tf.io.parse_tensor(sample["target_movie_tags"], out_type=tf.int32)
+    label = sample["label"]
+
+    return user_id, pos_tags, neg_tags, pos_cates, neg_cates, target_movie_tags, label
+
+
+def read_tf_records(batch_size):
+    train_dataset = tf.data.TFRecordDataset("train_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
+    test_dataset = tf.data.TFRecordDataset("test_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
+
+    return train_dataset, test_dataset
+    
