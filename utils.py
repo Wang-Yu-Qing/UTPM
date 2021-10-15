@@ -92,21 +92,21 @@ def extract_user_behaviors(filepath):
     return user_behaviors
 
 
-def split_users(users):
-    train, test = [], []
-    for user in users:
+def split_train_test(user_ids):
+    train_users, test_users = [], []
+    for user_id in user_ids:
         seed = random.randint(1, 10)
-        if seed <= 2:
-            test.append(user)
+        if seed > 2:
+            train_users.append(user_id)
         else:
-            train.append(user)
+            test_users.append(user_id)
+    
+    return train_users, test_users
 
-    return train, test
 
-
-def pad_or_cut(seq, size):
+def pad_or_cut(seq, size, pad_value):
     if len(seq) < size:
-        seq += [0] * (size - len(seq))
+        seq += [pad_value] * (size - len(seq))
     elif len(seq) > size:
         seq = random.choices(seq, k=size)
 

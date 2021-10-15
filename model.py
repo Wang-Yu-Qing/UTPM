@@ -2,25 +2,25 @@ import tensorflow as tf
 
 
 class UTPM:
-    def __init__(self, n_list_fea, E, T, C, D, U, dtype, pad_value):
+    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step):
+        self.log_step = log_step
         self.dtype = dtype
         # init embedding weights
         all_embeds = {
-            "user_id": self.init_trainable_weights([n_users, E]),
             "tag": self.init_trainable_weights([n_tags, E]),
             "cate": self.init_trainable_weights([n_cates, E]),
             "tag_label": self.init_trainable_weights([n_tags, U]),
-            "cross": init_trainable_weights([E, C])
+            "cross": self.init_trainable_weights([E, C])
         }
         # embedding op for padding value lookup
         all_pad_embeds_op = {
-            "tag": tf.compat.v1.scatter_update(tag_embeds,
+            "tag": tf.compat.v1.scatter_update(all_embeds["tag"],
                                                pad_value,
                                                tf.zeros([E,], dtype=dtype)),
-            "cate": tf.compat.v1.scatter_update(cate_embeds, 
+            "cate": tf.compat.v1.scatter_update(all_embeds["cate"], 
                                                 pad_value,
-                                                tf.zeros([E,], dtype=dtype))
-            "tag_label": tf.compat.v1.scatter_update(tag_embeds, 
+                                                tf.zeros([E,], dtype=dtype)),
+            "tag_label": tf.compat.v1.scatter_update(all_embeds["tag_label"], 
                                                      pad_value,
                                                      tf.zeros([E,], dtype=dtype))
         }
@@ -33,11 +33,17 @@ class UTPM:
         # fc weights
         self.fc1 = self.init_trainable_weights([E * (E - 1) / 2, D])
         self.fc2 = self.init_trainable_weights([D, U])
+        
+        self.trainable_weights = list(self.all_embeds.values()) + [self.Q, self.W_list_fea, self.B_list_fea, self.fc1, self.fc2]
+        
+        self.opt = tf.optimizers.Adam(learning_rate=lr)
+    
          
-    @staticmethod
-    def init_trainable_weights(shape):
-        return tf.Variable(tf.random.truncated_normal(shape, stddev=1.0),
-                           dtype=float,
+    def init_trainable_weights(self, shape):
+        print("dtype:")
+        print(self.dtype)
+        return tf.Variable(tf.random.truncated_normal(shape, stddev=1.0, dtype=self.dtype),
+                           dtype=self.dtype,
                            trainable=True)
     
     @staticmethod
@@ -131,7 +137,7 @@ class UTPM:
         # (batch_size, 0.5 * x_dim * (x_dim - 1))
         return tf.stack(res, axis=1)
 
-    def forward(self, batch_user_id, batch_pos_tag, batch_neg_tag, batch_pos_cate, batch_neg_cate):
+    def forward(self, batch_pos_tag, batch_neg_tag, batch_pos_cate, batch_neg_cate):
         pass
     
     def loss(self, batch_user_embed, batch_target_movie_tag, batch_label):
@@ -144,19 +150,31 @@ class UTPM:
         return (-1 / batch_labels.shape[0]) * tf.reduce_sum(batch_labels * tf.math.log(y_k) + (1 - batch_labels) * tf.math.log(1 - y_k), axis=0)
 
     def train(self, train_dataset):
-        batch_samples = {}
-        for i, _batch_samples in enumerate(train_dataset):
-            # X
-            batch_samples["user_id"] = _batch_samples[0]
-            batch_samples["pos_tag"] = _batch_samples[1]
-            batch_samples["neg_tag"] = _batch_samples[2]
-            batch_samples["pos_cate"] = _batch_samples[3]
-            batch_samples["neg_cate"] = _batch_samples[4]
-            # Y
-            batch_target_movie_tag = batch_samples[5]
-            batch_label = batch_samples[6]
+        for epoch in range(self.epochs):
+            epoch_total_loss, epoch_avg_loss = 0
+            for step, _batch_samples in enumerate(train_dataset):
+                # X
+                #batch_samples["user_id"] = _batch_samples[0]
+                batch_pos_tag = _batch_samples[1]
+                batch_neg_tag = _batch_samples[2]
+                batch_pos_cate = _batch_samples[3]
+                batch_neg_cate = _batch_samples[4]
+                # Y
+                batch_target_movie_tag = batch_samples[5]
+                batch_label = batch_samples[6]
 
-            batch_user_embed = self.forward(batch_user_id, batch_pos_tag, batch_neg_tag, batch_pos_cate, batch_neg_cate)
+                with tf.GradientTape() as tape:
+                    batch_user_embed = self.forward(batch_pos_tag, batch_neg_tag, batch_pos_cate, batch_neg_cate)
+                    batch_loss = self.loss(batch_user_embed, batch_target_movie_tag, batch_label)
+
+                epoch_total_loss += batch_loss
+                epoch_avg_loss = epoch_total_loss / (i + 1)
+                if step % self.log_step == 0:
+                    print("epoch: {:03d} | current_step: {:05d} | current_batch_loss: {:.4f} | epoch_avg_loss: {:.4f}".\
+                        format(epoch, step, batch_loss, epoch_avg_loss))
+
+                grads = tape.gradient(batch_loss, self.trainable_weights)
+                self.opt.apply_gradients(zip(grads, self.trainable_weights))
             
 
 
