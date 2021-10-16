@@ -4,7 +4,7 @@ from utils import *
 from model import UTPM
 
 BATCH_SIZE = 4
-DTYPE = tf.float64
+DTYPE = tf.float32
 PAD_VALUE = 0
 # TODO use param setting identical to the paper
 E = 16
@@ -13,8 +13,9 @@ U = 16
 C = 4
 D = 16
 lr = 0.001
-log_step = 100
+log_step = 20
 n_list_fea = 4
+epochs = 2
 
 
 if __name__ == "__main__":
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     n_cates = len(cate_decoder)
     print("n tags: {}, n cates: {}".format(n_tags, n_cates))
 
-    model = UTPM(n_tags, n_cates, n_list_fea, E, T, D, C, U, DTYPE, PAD_VALUE, lr, log_step)
+    model = UTPM(n_tags, n_cates, n_list_fea, E, T, D, C, U, DTYPE, PAD_VALUE, lr, log_step, epochs)
     model.train(train_dataset)
 
 

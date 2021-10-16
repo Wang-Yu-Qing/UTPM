@@ -119,6 +119,10 @@ def _bytes_feature(value):
         value = value.numpy() # get value of tensor
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
+def _float_feature(value):
+  """Returns a floast_list from a float / double."""
+  return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
+
 def _int64_feature(value):
   """Returns an int64_list from a bool / enum / int / uint."""
   return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
@@ -136,7 +140,7 @@ def parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, targe
         'pos_cates':  _bytes_feature(serialize_array(pos_cates)),
         'neg_cates':  _bytes_feature(serialize_array(neg_cates)),
         'target_movie_tags': _bytes_feature(serialize_array(target_movie_tags)),
-        'label':  _int64_feature(label)
+        'label':  _float_feature(label)
   }
 
   return tf.train.Example(features=tf.train.Features(feature=data))
@@ -173,7 +177,7 @@ def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate
         try:
             movie_tags = movie_tag_map[movie_id]
             # process features of this sample
-            sample = parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, movie_tags, action)                
+            sample = parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, movie_tags, float(action))
             samples.append(sample.SerializeToString())
         except KeyError:
             continue
@@ -220,7 +224,7 @@ def decode_one_tfrecord(sample):
       'pos_cates': tf.io.FixedLenFeature([], tf.string),
       'neg_cates': tf.io.FixedLenFeature([], tf.string),
       'target_movie_tags': tf.io.FixedLenFeature([], tf.string),
-      'label': tf.io.FixedLenFeature([], tf.int64)
+      'label': tf.io.FixedLenFeature([], tf.float32)
     }
 
     sample = tf.io.parse_single_example(sample, data)
