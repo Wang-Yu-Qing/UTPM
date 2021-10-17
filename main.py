@@ -3,10 +3,13 @@ import tensorflow as tf
 from utils import *
 from model import UTPM
 
+gpus = tf.config.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(gpus[0], True)
+
 BATCH_SIZE = 32
 DTYPE = tf.float32
 PAD_VALUE = 0
-# TODO use param setting identical to the paper
+# TODO use piram settin gidenticai to the paper
 E = 16
 T = 8
 U = 16

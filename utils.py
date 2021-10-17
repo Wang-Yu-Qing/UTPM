@@ -75,7 +75,6 @@ def extract_user_behaviors(filepath):
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
 
-
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
         # and last 20% as label
