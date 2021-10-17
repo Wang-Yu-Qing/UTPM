@@ -3,7 +3,7 @@ import tensorflow as tf
 from utils import *
 from model import UTPM
 
-BATCH_SIZE = 4
+BATCH_SIZE = 32
 DTYPE = tf.float32
 PAD_VALUE = 0
 # TODO use param setting identical to the paper
@@ -15,7 +15,7 @@ D = 16
 lr = 0.001
 log_step = 20
 n_list_fea = 4
-epochs = 2
+epochs = 10
 
 
 if __name__ == "__main__":

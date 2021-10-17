@@ -60,8 +60,6 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
-    # TODO: read full data
-    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -77,9 +75,6 @@ def extract_user_behaviors(filepath):
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
 
-            i += 1
-            if i == 1000:
-                break
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -132,7 +127,6 @@ def serialize_array(array):
   return array
 
 def parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, target_movie_tags, label):
-  # TODO: change int in list features to int64
   data = {
         'user_id':  _int64_feature(user_id),
         'pos_tags':  _bytes_feature(serialize_array(pos_tags)),
