@@ -1,11 +1,13 @@
+import time as time
 import tensorflow as tf
 
 
 class UTPM:
-    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs):
+    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross):
         self.log_step = log_step
         self.epochs = epochs
         self.dtype = dtype
+        self.use_cross = use_cross
         # init embedding weights
         self.all_embeds = {
             "tag": self.init_trainable_weights([n_tags, E], "tag_embeds"),
@@ -32,8 +34,13 @@ class UTPM:
         self.B_list_fea = self.init_trainable_weights([2, n_list_fea, T], "B")
 
         # fc weights
-        self.fc1 = self.init_trainable_weights([int(2 * E * (2 * E - 1) / 2), D], "fc1")
-        self.fc2 = self.init_trainable_weights([D, U], "fc2")
+        if self.use_cross:
+            self.fc1 = self.init_trainable_weights([int(2 * E * (2 * E - 1) / 2), D], "fc1")
+            self.fc2 = self.init_trainable_weights([D, U], "fc2")
+        else:
+            self.fc1 = self.init_trainable_weights([E, D], "fc1")
+            self.fc2 = self.init_trainable_weights([D, U], "fc2")
+
         
         self.trainable_weights = list(self.all_embeds.values()) + [self.Q, self.W_list_fea, self.B_list_fea, self.fc1, self.fc2]
         
@@ -148,12 +155,13 @@ class UTPM:
         return tf.stack(res, axis=1)
 
     def forward(self, batch_samples):
-        attention_res = self.attention_forward(batch_samples)
-        cross_res = self.brute_force_cross(attention_res, self.all_embeds["cross"])
-        fc1_res = tf.nn.relu(tf.matmul(cross_res, self.fc1))
-        fc2_res = tf.nn.relu(tf.matmul(fc1_res, self.fc2))
+        x = self.attention_forward(batch_samples)
+        if self.use_cross:
+            x = self.brute_force_cross(x, self.all_embeds["cross"])
+        x = tf.nn.relu(tf.matmul(x, self.fc1))
+        y = tf.nn.relu(tf.matmul(x, self.fc2))
 
-        return fc2_res
+        return y
     
     def loss(self, batch_user_embeds, batch_target_movie_tags, batch_labels):
         # (batch_size, n_tags, U)
@@ -172,6 +180,7 @@ class UTPM:
         for epoch in range(self.epochs):
             epoch_total_loss = 0
             for step, _batch_samples in enumerate(train_dataset):
+                tic = time.time()
                 # X
                 #batch_samples["user_id"] = _batch_samples[0]
                 batch_samples["pos_tag"] = _batch_samples[1]
@@ -185,12 +194,14 @@ class UTPM:
                 with tf.GradientTape() as tape:
                     batch_user_embeds = self.forward(batch_samples)
                     batch_loss = self.loss(batch_user_embeds, batch_target_movie_tag, batch_labels)
-
+                
                 epoch_total_loss += batch_loss
                 epoch_avg_loss = epoch_total_loss / (step + 1)
+
+                toc = time.time()
                 if step % self.log_step == 0:
-                    print("epoch: {:03d} | current_step: {:05d} | current_batch_loss: {:.4f} | epoch_avg_loss: {:.4f}".\
-                        format(epoch, step, batch_loss, epoch_avg_loss))
+                    print("epoch: {:03d} | current_step: {:05d} | current_batch_loss: {:.4f} | epoch_avg_loss: {:.4f} | step_time: {:.2f}".\
+                        format(epoch, step, batch_loss, epoch_avg_loss, toc - tic))
 
                 grads = tape.gradient(batch_loss, self.trainable_weights)
                 self.opt.apply_gradients(zip(grads, self.trainable_weights))

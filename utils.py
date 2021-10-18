@@ -1,3 +1,4 @@
+import faiss
 import random
 import numpy as np
 import tensorflow as tf
@@ -10,7 +11,7 @@ def extract_tags(tag_scores, movie_tag_rel, last_movie_id, top):
     tag_scores.clear()
 
 
-def extract_movie_tag_relation(filepath, top=10):
+def extract_movie_tag_relation(filepath, top):
     movie_tag_rel = {}
     max_tag_id = 0
     with open(filepath, "r") as f:
@@ -20,7 +21,7 @@ def extract_movie_tag_relation(filepath, top=10):
             line = line.strip()
             splitted = line.split(",")
             movie_id, tag_id, score = splitted[0], int(splitted[1]), float(splitted[2])
-            # use 0 as padding value
+            # use 0 as padding value, make sure original id not starting from 0
             tag_id += 1
             if last_movie_id is not None and movie_id != last_movie_id:
                 extract_tags(tag_scores, movie_tag_rel, last_movie_id, top)
@@ -34,7 +35,7 @@ def extract_movie_tag_relation(filepath, top=10):
 
 
 def extract_movie_cate_relation(filepath):
-    # use 0 as padding value
+    # use 0 as padding value, make sure original id not starting from 0
     cate_encoder, cate_decoder, cate_id = {}, [], 1
     movie_cate_rel = {}
     with open(filepath, "r", encoding="utf-8") as f:
@@ -139,7 +140,7 @@ def parse_single_sample(user_id, pos_tags, neg_tags, pos_cates, neg_cates, targe
   return tf.train.Example(features=tf.train.Features(feature=data))
 
 
-def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate_map, samples, pad_value):
+def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate_map, samples, pad_value, max_user_samples):
     # build features
     # list features no deduplicating
     pos_tags, neg_tags, pos_cates, neg_cates = [], [], [], []
@@ -165,6 +166,10 @@ def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate
     pos_cates = pad_or_cut(pos_cates, 200, pad_value)
     neg_cates = pad_or_cut(neg_cates, 15, pad_value)
 
+    # user max sample cut
+    if len(futures) > max_user_samples:
+        futures = random.choices(futures, k=max_user_samples)
+
     # build labels, each user has multi Ys
     for movie_id, action, timestamp in futures:
         try:
@@ -176,7 +181,7 @@ def build_user_tf_records(user_id, histories, futures, movie_tag_map, movie_cate
             continue
 
 
-def write_tf_records(train_users, test_users, user_behaviors, movie_tag_map, movie_cate_map, pad_value):
+def write_tf_records(train_users, test_users, user_behaviors, movie_tag_map, movie_cate_map, pad_value, max_user_samples):
     train_samples, test_samples = [], []
     for user_id in train_users:
         histories, futures = user_behaviors[user_id]["X"], user_behaviors[user_id]['Y']
@@ -186,7 +191,8 @@ def write_tf_records(train_users, test_users, user_behaviors, movie_tag_map, mov
                               movie_tag_map, 
                               movie_cate_map, 
                               train_samples,
-                              pad_value)
+                              pad_value,
+                              max_user_samples)
 
     for user_id in test_users:
         histories, futures = user_behaviors[user_id]["X"], user_behaviors[user_id]['Y']
@@ -196,7 +202,8 @@ def write_tf_records(train_users, test_users, user_behaviors, movie_tag_map, mov
                               movie_tag_map,
                               movie_cate_map,
                               test_samples,
-                              pad_value)
+                              pad_value,
+                              max_user_samples)
 
     with tf.io.TFRecordWriter('data/train_samples.tfrecords') as writer:
         for sample in train_samples:
@@ -206,7 +213,7 @@ def write_tf_records(train_users, test_users, user_behaviors, movie_tag_map, mov
         for sample in test_samples:
             writer.write(sample)
 
-    print("Tf records write done.")
+    print("Tf records write done. {} train samples, {} test samples".format(len(train_samples), len(test_samples)))
  
 
 def decode_one_tfrecord(sample):
@@ -235,7 +242,34 @@ def decode_one_tfrecord(sample):
 
 def read_tf_records(batch_size):
     train_dataset = tf.data.TFRecordDataset("data/train_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
-    test_dataset = tf.data.TFRecordDataset("data/test_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
+    test_dataset = tf.data.TFRecordDataset("data/test_samples.tfrecords").map(decode_one_tfrecord).batch(1)
 
     return train_dataset, test_dataset
     
+
+def evaluate(model, test_dataset, tag_embeds, U, K):
+    tag_embeds_index = faiss.IndexFlatL2(U)
+    tag_embeds_index.add(tag_embeds)
+
+    # test dataset to user_ids, user_embeds
+    user_ids, user_embeds = [], []
+    sample = {}
+    for _sample in test_dataset:
+        sample["user_id"] = sample[0]
+        sample["pos_tag"] = sample[1]
+        sample["neg_tag"] = sample[2]
+        sample["pos_cate"] = sample[3]
+        sample["neg_cate"] = sample[4]
+        
+        batch_target_movie_tag = _batch_samples[5]
+        batch_labels = _batch_samples[6]
+        
+        model.forward()
+    
+    res = tag_embeds_index.search(user_embeds, K)
+    for user_id, neigh in zip(user_ids, res):
+        pass
+    
+
+def precision_at_K(K):
+    pass
