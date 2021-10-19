@@ -1,8 +1,34 @@
 import faiss
 import random
+import argparse
 import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
+
+
+
+def parse_args():
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--gpu', type=bool, default='True', help="if use single gpu for training")
+    argparser.add_argument('--epochs', type=int, default=10)
+    argparser.add_argument('--batch_size', type=int, default=32)
+    argparser.add_argument('--E', type=int, default=16)
+    argparser.add_argument('--T', type=int, default=8)
+    argparser.add_argument('--U', type=int, default=16)
+    argparser.add_argument('--C', type=int, default=4)
+    argparser.add_argument('--D', type=int, default=16)
+    argparser.add_argument('--lr', type=float, default=0.001, help="learning rate")
+    argparser.add_argument('--log_step', type=int, default=100)
+    argparser.add_argument('--use_cross', type=bool, default=False, help="if use cross layer")
+    argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
+    argparser.add_argument('--max_tags_per_movie', type=int, default=10, help="max tags per movie")
+    argparser.add_argument('--n_list_fea', type=int, default=4, help="number of list features")
+    # TODO:
+    argparser.add_argument('--early_stop_thred', type=float, default=10, help="threshold of epochs loss gap to early stop")
+
+    args = argparser.parse_args()
+    
+    return args
 
 
 def extract_tags(tag_scores, movie_tag_rel, last_movie_id, top):
@@ -61,6 +87,8 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
+    # TODO
+    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -75,6 +103,9 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
+            if i == 10000:
+                break
+            i += 1
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -251,11 +282,10 @@ def evaluate(model, test_dataset, tag_embeds, U, K):
     tag_embeds_index = faiss.IndexFlatL2(U)
     tag_embeds_index.add(tag_embeds)
 
-    # test dataset to user_ids, user_embeds
+    # query each user's embedding using trained model
     user_ids, user_embeds = [], []
     sample = {}
     for _sample in test_dataset:
-        sample["user_id"] = sample[0]
         sample["pos_tag"] = sample[1]
         sample["neg_tag"] = sample[2]
         sample["pos_cate"] = sample[3]
@@ -264,12 +294,26 @@ def evaluate(model, test_dataset, tag_embeds, U, K):
         batch_target_movie_tag = _batch_samples[5]
         batch_labels = _batch_samples[6]
         
-        model.forward()
-    
+        # squeeze batch dim -> (U, )
+        user_embedding = tf.squeeze(model.forward(sample), axis=0).numpy()
+        
+        user_id = tf.squeeze(tf.squeeze(sample[0]), axis=0).numpy()
+        print("u embed shape: ", user_embedding.shape)
+
+        user_ids.append(user_id)
+        user_embeds.append(user_embedding)
+
+    user_embeds = np.array(user_embeds)
+    print(user_embeds.shape)
+    exit(0)
+
     res = tag_embeds_index.search(user_embeds, K)
     for user_id, neigh in zip(user_ids, res):
         pass
-    
+
 
 def precision_at_K(K):
     pass
+
+
+

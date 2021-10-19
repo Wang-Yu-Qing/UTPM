@@ -1,20 +1,24 @@
+import pickle
 import time as time
 import tensorflow as tf
 
 
 class UTPM:
-    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross):
+    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred):
         self.log_step = log_step
         self.epochs = epochs
         self.dtype = dtype
         self.use_cross = use_cross
+        self.early_stop_thred = early_stop_thred
         # init embedding weights
         self.all_embeds = {
             "tag": self.init_trainable_weights([n_tags, E], "tag_embeds"),
             "cate": self.init_trainable_weights([n_cates, E], "cate_embeds"),
             "tag_label": self.init_trainable_weights([n_tags, U], "tag_label_embeds"),
-            "cross": self.init_trainable_weights([2 * E, C], "cross_embeds")
         }
+        if use_cross:
+            self.all_embeds["cross"] = self.init_trainable_weights([2 * E, C], "cross_embeds")
+
         # embedding op for padding value lookup
         self.all_pad_embeds_op = {
             "tag": tf.compat.v1.scatter_update(self.all_embeds["tag"],
@@ -38,7 +42,7 @@ class UTPM:
             self.fc1 = self.init_trainable_weights([int(2 * E * (2 * E - 1) / 2), D], "fc1")
             self.fc2 = self.init_trainable_weights([D, U], "fc2")
         else:
-            self.fc1 = self.init_trainable_weights([E, D], "fc1")
+            self.fc1 = self.init_trainable_weights([2 * E, D], "fc1")
             self.fc2 = self.init_trainable_weights([D, U], "fc2")
 
         
@@ -63,7 +67,7 @@ class UTPM:
         
         return embeds
 
-    def head_attention(self, embeds, head_idx, Q, W, B):
+    def head_attention(self, embeds, head_idx, Q, W, B, return_weights=False):
         """
             @embeds: (batch_size, n, E), batch of all t_i
             @head_idx: scalar
@@ -81,12 +85,15 @@ class UTPM:
         relued = tf.expand_dims(tf.nn.relu(add_B), 2) # (batch_size, n, 1, T)
         matmul_Q = tf.squeeze(tf.matmul(relued, Q_head), axis=[2, 3]) # (batch_size, n)
         alphas = tf.expand_dims(tf.nn.softmax(matmul_Q), 1) # (batch_size, 1, n)
+        # no squeeze for further list fea merged embedding concat with single fea embedding
         res = tf.matmul(alphas, embeds) # (batch_size, 1, E)
         
-        # no squeeze for further list fea merged embedding concat with single fea embedding
-        return res
+        if return_weights:
+            return res, tf.squeeze(alphas, axis=1)
+        else:
+            return res
     
-    def attention_forward(self, batch_features):
+    def attention_forward(self, batch_features, return_weights=False):
         batch_single_fea_embeds = []
         batch_list_fea_embeds = {}
         # query embeddings
@@ -107,7 +114,8 @@ class UTPM:
             # (batch_size, n_single_fea, E)
             batch_single_fea_embeds = tf.stack(batch_single_fea_embeds, axis=1) 
         
-        h0_batch_fea_embeds, h1_batch_fea_embeds = [], []
+        h0_batch_fea_embeds, h1_batch_fea_embeds,  = [], []
+        attention_weights = {}
         # get list fea's W and B, 0 for list features
         for i, (list_fea_name, _batch_list_fea_embeds) in enumerate(batch_list_fea_embeds.items()):
             # (n_head, batch_size, list_length, E, T)
@@ -115,9 +123,15 @@ class UTPM:
             # (n_head, batch_size, list_length, T)
             B = self.B_list_fea[:, i, :]
             
-            # merge list feature embeds to produce one embedding for the list feature
-            h0_batch_list_fea_merged = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
-            h1_batch_list_fea_merged = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
+            if return_weights:
+                h0_batch_list_fea_merged, h0_weights = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B, True) # (batch_size, 1, E)
+                h1_batch_list_fea_merged, h1_weights = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B, True) # (batch_size, 1, E)
+                attention_weights[list_fea_name + "_h0"] = h0_weights
+                attention_weights[list_fea_name + "_h1"] = h1_weights
+            else:
+                # merge list feature embeds to produce one embedding for the list feature
+                h0_batch_list_fea_merged = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
+                h1_batch_list_fea_merged = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
 
             if batch_single_fea_embeds:
                 # if has any single value feature, append attention merged list feature's embedding to all feature embeddings
@@ -136,7 +150,10 @@ class UTPM:
         h1_batch_res = self.head_attention(h1_batch_fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
         
         # (batch_size, 2E)
-        return tf.squeeze(tf.concat([h0_batch_res, h1_batch_res], axis=2), axis=1)
+        if return_weights:
+            return tf.squeeze(tf.concat([h0_batch_res, h1_batch_res], axis=2), axis=1), attention_weights
+        else:
+            return tf.squeeze(tf.concat([h0_batch_res, h1_batch_res], axis=2), axis=1)
 
     def brute_force_cross(self, x_batch, embeds):
         res = []
@@ -162,6 +179,15 @@ class UTPM:
         y = tf.nn.relu(tf.matmul(x, self.fc2))
 
         return y
+
+    def forward_with_attention_details(self, batch_samples):
+        x, attention_weights = self.attention_forward(batch_samples, return_weights=True)
+        if self.use_cross:
+            x = self.brute_force_cross(x, self.all_embeds["cross"])
+        x = tf.nn.relu(tf.matmul(x, self.fc1))
+        y = tf.nn.relu(tf.matmul(x, self.fc2))
+
+        return y, attention_weights
     
     def loss(self, batch_user_embeds, batch_target_movie_tags, batch_labels):
         # (batch_size, n_tags, U)
@@ -176,8 +202,9 @@ class UTPM:
         return (-1 / batch_labels.shape[0]) * tf.reduce_sum(batch_labels * tf.math.log(y_k) + (1 - batch_labels) * tf.math.log(1 - y_k), axis=0)
 
     def train(self, train_dataset):
+        last_epoch_avg_loss = float("inf")
         batch_samples = {}
-        for epoch in range(self.epochs):
+        for epoch_idx, epoch in enumerate(range(self.epochs)):
             epoch_total_loss = 0
             for step, _batch_samples in enumerate(train_dataset):
                 tic = time.time()
@@ -200,12 +227,35 @@ class UTPM:
 
                 toc = time.time()
                 if step % self.log_step == 0:
-                    print("epoch: {:03d} | current_step: {:05d} | current_batch_loss: {:.4f} | epoch_avg_loss: {:.4f} | step_time: {:.2f}".\
+                    print("epoch: {:03d} | current_step: {:05d} | current_batch_loss: {:.4f} | epoch_avg_loss: {:.4f} | step_time: {:.5f}".\
                         format(epoch, step, batch_loss, epoch_avg_loss, toc - tic))
 
                 grads = tape.gradient(batch_loss, self.trainable_weights)
                 self.opt.apply_gradients(zip(grads, self.trainable_weights))
-            
 
+            print("Epoch {} done, epoch avg loss: {}".format(epoch_idx + 1, epoch_avg_loss))
 
+            if last_epoch_avg_loss - epoch_avg_loss < self.early_stop_thred:
+                print("Early stop")
+                break
+
+            last_epoch_avg_loss = epoch_avg_loss
+
+    def query_tags_embeds(self, tag_ids):
+        """
+            Use trained tag label embedding vecs as tag embeds during prediction.
+            Not using tag embedding in the input layer, 
+            because the prediction during model training is based on the dot product
+            of the movie's tags label embeddings.
+        """
+        return tf.nn.embedding_lookup(self.all_embeds["tag_label"], tag_ids)
+    
+    def save_weights(self):
+        with open("model_weights", "wb") as f:
+            f.write(pickle.dumps(self.trainable_weights))
+
+    def load_weights(self):
+        pass
+        
+    
             
