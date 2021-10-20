@@ -20,7 +20,7 @@ if __name__ == "__main__":
     user_behaviors = extract_user_behaviors("data/ml-20m/ratings.csv")
 
     train_users, test_users = split_train_test(user_behaviors.keys())
-    print("n train users: {}, n test users: {}".format(len(train_users), len(test_users)))
+    print("Number of train users: {}, number of test users: {}".format(len(train_users), len(test_users)))
 
     write_tf_records(train_users, 
                      test_users, 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     train_dataset, test_dataset = read_tf_records(args.batch_size)
 
     n_cates = len(cate_decoder)
-    print("n tags: {}, n cates: {}".format(n_tags, n_cates))
+    print("Numer of tags: {}, number cates: {}".format(n_tags, n_cates))
 
     model = UTPM(n_tags, 
                  n_cates, 
@@ -51,5 +51,8 @@ if __name__ == "__main__":
                  args.use_cross,
                  args.early_stop_thred)
 
+    # TODO: check if pad value's embedding not trained
     model.train(train_dataset)
+    model.save_weights("saved_model.pickle")
+    
 

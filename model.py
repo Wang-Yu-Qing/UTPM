@@ -44,9 +44,11 @@ class UTPM:
         else:
             self.fc1 = self.init_trainable_weights([2 * E, D], "fc1")
             self.fc2 = self.init_trainable_weights([D, U], "fc2")
-
         
-        self.trainable_weights = list(self.all_embeds.values()) + [self.Q, self.W_list_fea, self.B_list_fea, self.fc1, self.fc2]
+        self.trainable_weights = [self.all_embeds["tag"], 
+                                  self.all_embeds["cate"], 
+                                  self.all_embeds["tag_label"]] + \
+                                 [self.Q, self.W_list_fea, self.B_list_fea, self.fc1, self.fc2]
         
         self.opt = tf.optimizers.Adam(learning_rate=lr)
     
@@ -250,12 +252,25 @@ class UTPM:
         """
         return tf.nn.embedding_lookup(self.all_embeds["tag_label"], tag_ids)
     
-    def save_weights(self):
-        with open("model_weights", "wb") as f:
+    def save_weights(self, filepath):
+        print("Save model weights to {}".format(filepath))
+        with open(filepath, "wb") as f:
             f.write(pickle.dumps(self.trainable_weights))
 
-    def load_weights(self):
-        pass
+    def load_weights(self, filepath):
+        print("Load model weights from {}".format(filepath))
+        with open(filepath, "rb") as f:
+            weights = pickle.loads(f.read())
+            self.all_embeds = {
+                "tag": weights[0],
+                "cate": weights[1],
+                "tag_label": weights[2],
+            }
+            self.Q = weights[3]
+            self.W_list_fea = weights[4]
+            self.B_list_fea = weights[5]
+            self.fc1 = weights[6]
+            self.fc2 = weights[7]
         
     
             

@@ -19,12 +19,12 @@ def parse_args():
     argparser.add_argument('--D', type=int, default=16)
     argparser.add_argument('--lr', type=float, default=0.001, help="learning rate")
     argparser.add_argument('--log_step', type=int, default=100)
+    # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="if use cross layer")
     argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
     argparser.add_argument('--max_tags_per_movie', type=int, default=10, help="max tags per movie")
     argparser.add_argument('--n_list_fea', type=int, default=4, help="number of list features")
-    # TODO:
-    argparser.add_argument('--early_stop_thred', type=float, default=10, help="threshold of epochs loss gap to early stop")
+    argparser.add_argument('--early_stop_thred', type=float, default=0.005, help="threshold of epochs loss gap to early stop")
 
     args = argparser.parse_args()
     
@@ -87,8 +87,6 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
-    # TODO
-    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -103,9 +101,6 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
-            if i == 10000:
-                break
-            i += 1
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
