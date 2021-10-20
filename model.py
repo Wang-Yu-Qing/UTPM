@@ -243,14 +243,19 @@ class UTPM:
 
             last_epoch_avg_loss = epoch_avg_loss
 
-    def query_tags_embeds(self, tag_ids):
+    def query_tags_embeds(self, n_tags):
         """
+            @n_tags: number of tags, including padding id 0
             Use trained tag label embedding vecs as tag embeds during prediction.
             Not using tag embedding in the input layer, 
             because the prediction during model training is based on the dot product
             of the movie's tags label embeddings.
         """
-        return tf.nn.embedding_lookup(self.all_embeds["tag_label"], tag_ids)
+        tag_ids = tf.constant(range(1, n_tags))
+
+        # tag id will -1 in further query
+        return tf.nn.embedding_lookup(self.all_embeds["tag_label"], tag_ids).numpy()
+
     
     def save_weights(self, filepath):
         print("Save model weights to {}".format(filepath))

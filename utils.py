@@ -87,6 +87,8 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
+    # TODO
+    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -101,6 +103,10 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
+            
+            i += 1
+            if i == 1000:
+                break
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -275,36 +281,35 @@ def read_tf_records(batch_size):
 
 def evaluate(model, test_dataset, tag_embeds, U, K):
     tag_embeds_index = faiss.IndexFlatL2(U)
+    # id will -1 in neigh search
     tag_embeds_index.add(tag_embeds)
 
     # query each user's embedding using trained model
     user_ids, user_embeds = [], []
     sample = {}
     for _sample in test_dataset:
-        sample["pos_tag"] = sample[1]
-        sample["neg_tag"] = sample[2]
-        sample["pos_cate"] = sample[3]
-        sample["neg_cate"] = sample[4]
+        # TODO: deduplicate user id
+        sample["pos_tag"] = _sample[1]
+        sample["neg_tag"] = _sample[2]
+        sample["pos_cate"] = _sample[3]
+        sample["neg_cate"] = _sample[4]
         
-        batch_target_movie_tag = _batch_samples[5]
-        batch_labels = _batch_samples[6]
+        batch_target_movie_tag = _sample[5]
+        batch_labels = _sample[6]
         
         # squeeze batch dim -> (U, )
         user_embedding = tf.squeeze(model.forward(sample), axis=0).numpy()
-        
-        user_id = tf.squeeze(tf.squeeze(sample[0]), axis=0).numpy()
-        print("u embed shape: ", user_embedding.shape)
-
-        user_ids.append(user_id)
+        print(user_embedding)
+        print(_sample[0])
+        user_ids.append(_sample[0])
         user_embeds.append(user_embedding)
 
-    user_embeds = np.array(user_embeds)
-    print(user_embeds.shape)
-    exit(0)
 
+    # NOTE: faiss search result index starts from 0, but actual tag_id starts from 1
     res = tag_embeds_index.search(user_embeds, K)
-    for user_id, neigh in zip(user_ids, res):
-        pass
+    for user_id, tag_neigh in zip(user_ids, res):
+        for _tag_id in tag_neigh:
+            tag_id = _tag_id + 1
 
 
 def precision_at_K(K):

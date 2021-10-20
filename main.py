@@ -52,7 +52,15 @@ if __name__ == "__main__":
                  args.early_stop_thred)
 
     # TODO: check if pad value's embedding not trained
-    model.train(train_dataset)
+    #model.train(train_dataset)
     model.save_weights("saved_model.pickle")
+
+    model.load_weights("saved_model.pickle")
+
+    tags_embeds = model.query_tags_embeds(n_tags)
+
+    evaluate(model, test_dataset, tags_embeds, args.U, 10)
+
+
     
 
