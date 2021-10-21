@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     tags_embeds = model.query_tags_embeds(n_tags)
 
-    evaluate(model, test_dataset, tags_embeds, args.U, 10)
+    evaluate(model, test_dataset, tags_embeds, args.U)
 
 
     

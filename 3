@@ -87,6 +87,8 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
+    # TODO
+    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -101,6 +103,10 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
+            
+            i += 1
+            if i == 5000:
+                break
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -268,12 +274,12 @@ def decode_one_tfrecord(sample):
 
 def read_tf_records(batch_size):
     train_dataset = tf.data.TFRecordDataset("data/train_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size).shuffle(1024)
-    test_dataset = tf.data.TFRecordDataset("data/test_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size)
+    test_dataset = tf.data.TFRecordDataset("data/test_samples.tfrecords").map(decode_one_tfrecord).batch(1)
 
     return train_dataset, test_dataset
     
 
-def evaluate(model, test_dataset, tag_embeds, U):
+def evaluate(model, test_dataset, tag_embeds, U, K):
     # create tag embedding vecs index for similarity search
     tag_embeds_index = faiss.IndexFlatL2(U)
     # id will -1 in neigh search
@@ -282,23 +288,16 @@ def evaluate(model, test_dataset, tag_embeds, U):
     # query each user's embedding using trained model
     user_embeds, sample, user_true_tags = {}, {}, {}
     for _sample in test_dataset:
-        # TODO: deal with batch
         user_id = _sample[0].numpy()[0]
         sample["pos_tag"] = _sample[1]
         sample["neg_tag"] = _sample[2]
         sample["pos_cate"] = _sample[3]
         sample["neg_cate"] = _sample[4]
         
-        batch_target_movie_tags = _sample[5]
+        batch_target_movie_tag = _sample[5]
         batch_labels = _sample[6]
-        if user_id not in user_true_tags:
-            user_true_tags[user_id] = set()
-
-        if batch_labels.numpy()[0] == 1:
-            true_tags = batch_target_movie_tags.numpy()[0].tolist()
-            for tag in true_tags:
-                user_true_tags[user_id].add(tag)
-
+        print(batch_labels)
+        exit(0)
         # squeeze batch dim -> (U, )
         user_embedding = tf.squeeze(model.forward(sample), axis=0).numpy()
         user_embeds[user_id] = user_embedding
@@ -310,28 +309,22 @@ def evaluate(model, test_dataset, tag_embeds, U):
         user_vecs.append(vec)
     user_vecs = np.array(user_vecs)
 
-    for K in [1, 5, 10, 20, 50]:
-        dis, neigh = tag_embeds_index.search(user_vecs, K)
-        user_true_tags_pred = {}
-        for user_idx, _neigh in enumerate(neigh):
-            user_id = idx_2_user_id[user_idx]
-            user_true_tags_pred[user_id] = []
-            for _tag_id in _neigh:
-                tag_id = _tag_id + 1
-                user_true_tags_pred[user_id].append(tag_id)
-        
-        print("precision@{}: {}".format(K, precision_at_K(user_true_tags_pred, user_true_tags, K)))
+    res = tag_embeds_index.search(user_vecs, K)
+    del user_vecs
 
-
-def precision_at_K(user_true_tags_pred, user_true_tags, K):
-    res = 0
-    for user_id, pred_tags in user_true_tags_pred.items():
-        hit = 0
-        true_tags = user_true_tags[user_id]
-        for tag in pred_tags:
-            if tag in true_tags:
-                hit += 1
-        res += (hit / min(K, len(true_tags)))
+    user_prefer_tags = {}
+    for user_idx, tag_neigh in enumerate(res):
+        user_id = idx_2_user_id[user_id]
+        user_prefer_tags[user_id] = []
+        for _tag_id in tag_neigh:
+            tag_id = _tag_id + 1
+            user_prefer_tags[user_id].append(tag_id)
     
-    return res / len(user_true_tags_pred)
+
+
+
+def precision_at_K(K):
+    pass
+
+
 
