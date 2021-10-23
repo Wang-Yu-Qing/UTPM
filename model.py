@@ -5,6 +5,8 @@ import tensorflow as tf
 
 class UTPM:
     def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred):
+        self.E = E
+        self.pad_value = pad_value
         self.log_step = log_step
         self.epochs = epochs
         self.dtype = dtype
@@ -20,17 +22,7 @@ class UTPM:
             self.all_embeds["cross"] = self.init_trainable_weights([2 * E, C], "cross_embeds")
 
         # embedding op for padding value lookup
-        self.all_pad_embeds_op = {
-            "tag": tf.compat.v1.scatter_update(self.all_embeds["tag"],
-                                               pad_value,
-                                               tf.zeros([E,], dtype=dtype)),
-            "cate": tf.compat.v1.scatter_update(self.all_embeds["cate"], 
-                                                pad_value,
-                                                tf.zeros([E,], dtype=dtype)),
-            "tag_label": tf.compat.v1.scatter_update(self.all_embeds["tag_label"], 
-                                                     pad_value,
-                                                     tf.zeros([E,], dtype=dtype))
-        }
+        self.reset_pad_embedding()
 
         # attention weights
         self.Q = self.init_trainable_weights([2, T, 1], "Q")
@@ -59,15 +51,16 @@ class UTPM:
                            name=name,
                            trainable=True)
     
-    @staticmethod
-    def embedding_lookup_with_padding(embedding_weights, values, op):
-        """
-            set padding value's embedding value as 0 vec
-        """
-        with tf.control_dependencies([op]):
-            embeds = tf.nn.embedding_lookup(embedding_weights, values)
-        
-        return embeds
+    def reset_pad_embedding(self):
+        tf.compat.v1.scatter_update(self.all_embeds["tag"],
+                                    self.pad_value,
+                                    tf.zeros([self.E,], dtype=self.dtype)),
+        tf.compat.v1.scatter_update(self.all_embeds["cate"], 
+                                    self.pad_value,
+                                    tf.zeros([self.E,], dtype=self.dtype)),
+        tf.compat.v1.scatter_update(self.all_embeds["tag_label"], 
+                                    self.pad_value,
+                                    tf.zeros([self.E,], dtype=self.dtype))
 
     def head_attention(self, embeds, head_idx, Q, W, B, return_weights=False):
         """
@@ -106,9 +99,9 @@ class UTPM:
             else:
                 # lookup list fea embeddings (with padding)
                 if key == "pos_tag" or key == "neg_tag":
-                    batch_list_fea_embeds[key] = self.embedding_lookup_with_padding(self.all_embeds["tag"], value, self.all_pad_embeds_op["tag"])
+                    batch_list_fea_embeds[key] = tf.nn.embedding_lookup(self.all_embeds["tag"], value)
                 elif key == "pos_cate" or key == "neg_cate":
-                    batch_list_fea_embeds[key] = self.embedding_lookup_with_padding(self.all_embeds["cate"], value, self.all_pad_embeds_op["cate"])
+                    batch_list_fea_embeds[key] = tf.nn.embedding_lookup(self.all_embeds["cate"], value)
                 else:
                     raise InvalidArgumentException("Wrong feature name: {}".format(key)) 
         
@@ -193,7 +186,7 @@ class UTPM:
     
     def loss(self, batch_user_embeds, batch_target_movie_tags, batch_labels):
         # (batch_size, n_tags, U)
-        batch_target_tags_embeds = self.embedding_lookup_with_padding(self.all_embeds["tag_label"], batch_target_movie_tags, self.all_pad_embeds_op["tag_label"])
+        batch_target_tags_embeds = tf.nn.embedding_lookup(self.all_embeds["tag_label"], batch_target_movie_tags)
 
         # (batch_size, )
         y_k = tf.math.sigmoid(tf.reduce_sum(tf.squeeze(tf.matmul(batch_target_tags_embeds, tf.expand_dims(batch_user_embeds, axis=2)), axis=2), axis=1))
@@ -206,7 +199,7 @@ class UTPM:
     def train(self, train_dataset):
         last_epoch_avg_loss = float("inf")
         batch_samples = {}
-        for epoch_idx, epoch in enumerate(range(self.epochs)):
+        for epoch in range(self.epochs):
             epoch_total_loss = 0
             for step, _batch_samples in enumerate(train_dataset):
                 tic = time.time()
@@ -230,12 +223,14 @@ class UTPM:
                 toc = time.time()
                 if step % self.log_step == 0:
                     print("epoch: {:03d} | current_step: {:05d} | current_batch_loss: {:.4f} | epoch_avg_loss: {:.4f} | step_time: {:.5f}".\
-                        format(epoch, step, batch_loss, epoch_avg_loss, toc - tic))
+                        format(epoch + 1, step, batch_loss, epoch_avg_loss, toc - tic))
 
                 grads = tape.gradient(batch_loss, self.trainable_weights)
                 self.opt.apply_gradients(zip(grads, self.trainable_weights))
+                
+                self.reset_pad_embedding()
 
-            print("Epoch {} done, epoch avg loss: {}".format(epoch_idx + 1, epoch_avg_loss))
+            print("Epoch {} done, epoch avg loss: {}".format(epoch + 1, epoch_avg_loss))
 
             if last_epoch_avg_loss - epoch_avg_loss < self.early_stop_thred:
                 print("Early stop")

@@ -18,7 +18,7 @@ def parse_args():
     argparser.add_argument('--C', type=int, default=4)
     argparser.add_argument('--D', type=int, default=16)
     argparser.add_argument('--lr', type=float, default=0.001, help="learning rate")
-    argparser.add_argument('--log_step', type=int, default=100)
+    argparser.add_argument('--log_step', type=int, default=1000)
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="if use cross layer")
     argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
@@ -87,6 +87,7 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
+    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -101,6 +102,10 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
+
+            i += 1
+            if i == 10000:
+                break
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -135,7 +140,7 @@ def pad_or_cut(seq, size, pad_value):
 
 
 def _bytes_feature(value):
-    """Returns a bytes_list from a string / byte."""
+    """Returns a bytes_lis from a string / byte."""
     if isinstance(value, type(tf.constant(0))): # if value ist tensor
         value = value.numpy() # get value of tensor
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
@@ -275,33 +280,38 @@ def read_tf_records(batch_size):
 
 def evaluate(model, test_dataset, tag_embeds, U):
     # create tag embedding vecs index for similarity search
-    tag_embeds_index = faiss.IndexFlatL2(U)
+    # using brute-force dot-product as similarity
+    tag_embeds_index = faiss.IndexFlatIP(U)
     # id will -1 in neigh search
     tag_embeds_index.add(tag_embeds)
 
     # query each user's embedding using trained model
     user_embeds, sample, user_true_tags = {}, {}, {}
     for _sample in test_dataset:
-        # TODO: deal with batch
-        user_id = _sample[0].numpy()[0]
+        user_ids = _sample[0]
         sample["pos_tag"] = _sample[1]
         sample["neg_tag"] = _sample[2]
         sample["pos_cate"] = _sample[3]
         sample["neg_cate"] = _sample[4]
+
+        batch_user_embeds = model.forward(sample)
         
         batch_target_movie_tags = _sample[5]
         batch_labels = _sample[6]
-        if user_id not in user_true_tags:
-            user_true_tags[user_id] = set()
 
-        if batch_labels.numpy()[0] == 1:
-            true_tags = batch_target_movie_tags.numpy()[0].tolist()
-            for tag in true_tags:
-                user_true_tags[user_id].add(tag)
+        for user_id, target_movie_tags, label, user_embed in zip(user_ids, batch_target_movie_tags, batch_labels, batch_user_embeds):
+            # squeeze batch dim -> (U, )
+            _user_id = user_id.numpy()
+            user_embeds[_user_id] = user_embed
 
-        # squeeze batch dim -> (U, )
-        user_embedding = tf.squeeze(model.forward(sample), axis=0).numpy()
-        user_embeds[user_id] = user_embedding
+            # gather user true interest tags
+            if label.numpy() == 1:
+                if _user_id not in user_true_tags:
+                    user_true_tags[_user_id] = set()
+
+                true_tags = target_movie_tags.numpy()
+                for tag in true_tags:
+                    user_true_tags[_user_id].add(tag)
 
     # NOTE: faiss search result index starts from 0, but actual tag_id starts from 1
     idx_2_user_id, user_vecs = [], []
@@ -327,11 +337,12 @@ def precision_at_K(user_true_tags_pred, user_true_tags, K):
     res = 0
     for user_id, pred_tags in user_true_tags_pred.items():
         hit = 0
-        true_tags = user_true_tags[user_id]
-        for tag in pred_tags:
-            if tag in true_tags:
-                hit += 1
-        res += (hit / min(K, len(true_tags)))
+        if user_id in user_true_tags:
+            true_tags = user_true_tags[user_id]
+            for tag in pred_tags:
+                if tag in true_tags:
+                    hit += 1
+            res += (hit / min(K, len(true_tags)))
     
     return res / len(user_true_tags_pred)
 
