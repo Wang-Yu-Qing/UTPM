@@ -61,6 +61,8 @@ if __name__ == "__main__":
 
     model.load_weights("saved_model.pickle")
 
+    debug = {}
+    batch_samples = {}
     for step, _batch_samples in enumerate(train_dataset):
         # X
         #batch_samples["user_id"] = _batch_samples[0]
@@ -73,9 +75,9 @@ if __name__ == "__main__":
         batch_target_movie_tag = _batch_samples[5]
         batch_labels = _batch_samples[6]
 
-        batch_user_embeds = self.forward(batch_samples)
-        batch_loss = self.loss(batch_user_embeds, batch_target_movie_tag, batch_labels)
-        print(batch_loss)
+        batch_user_embeds = model.forward(batch_samples)
+        batch_loss = model.loss(batch_user_embeds, batch_target_movie_tag, batch_labels)
+        #print(batch_loss)
         
 
     tags_embeds = model.query_tags_embeds(n_tags)
