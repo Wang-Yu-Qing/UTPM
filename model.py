@@ -6,6 +6,7 @@ import tensorflow as tf
 class UTPM:
     def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred):
         self.E = E
+        self.U = U
         self.pad_value = pad_value
         self.log_step = log_step
         self.epochs = epochs
@@ -60,7 +61,7 @@ class UTPM:
                                     tf.zeros([self.E,], dtype=self.dtype)),
         tf.compat.v1.scatter_update(self.all_embeds["tag_label"], 
                                     self.pad_value,
-                                    tf.zeros([self.E,], dtype=self.dtype))
+                                    tf.zeros([self.U,], dtype=self.dtype))
 
     def head_attention(self, embeds, head_idx, Q, W, B, return_weights=False):
         """
@@ -191,8 +192,8 @@ class UTPM:
         # (batch_size, )
         y_k = tf.math.sigmoid(tf.reduce_sum(tf.squeeze(tf.matmul(batch_target_tags_embeds, tf.expand_dims(batch_user_embeds, axis=2)), axis=2), axis=1))
         # log(x) needs x > 0 for both x = y_k and x = 1 - y_k
-        y_k = tf.math.minimum(y_k, 1 - 1e-05)
-        y_k = tf.math.maximum(y_k, 0 + 1e-05)
+        y_k = tf.math.minimum(y_k, 1 - 1e-06)
+        y_k = tf.math.maximum(y_k, 0 + 1e-06)
 
         return (-1 / batch_labels.shape[0]) * tf.reduce_sum(batch_labels * tf.math.log(y_k) + (1 - batch_labels) * tf.math.log(1 - y_k), axis=0)
 
@@ -209,6 +210,7 @@ class UTPM:
                 batch_samples["neg_tag"] = _batch_samples[2]
                 batch_samples["pos_cate"] = _batch_samples[3]
                 batch_samples["neg_cate"] = _batch_samples[4]
+
                 # Y
                 batch_target_movie_tag = _batch_samples[5]
                 batch_labels = _batch_samples[6]

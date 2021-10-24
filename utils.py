@@ -10,15 +10,15 @@ from sklearn.model_selection import train_test_split
 def parse_args():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--gpu', type=bool, default='True', help="if use single gpu for training")
-    argparser.add_argument('--epochs', type=int, default=10)
-    argparser.add_argument('--batch_size', type=int, default=32)
+    argparser.add_argument('--epochs', type=int, default=20)
+    argparser.add_argument('--batch_size', type=int, default=64)
     argparser.add_argument('--E', type=int, default=16)
     argparser.add_argument('--T', type=int, default=8)
     argparser.add_argument('--U', type=int, default=16)
     argparser.add_argument('--C', type=int, default=4)
     argparser.add_argument('--D', type=int, default=16)
     argparser.add_argument('--lr', type=float, default=0.001, help="learning rate")
-    argparser.add_argument('--log_step', type=int, default=1000)
+    argparser.add_argument('--log_step', type=int, default=500)
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="if use cross layer")
     argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
@@ -87,6 +87,7 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
+    # TODO
     i = 0
     with open(filepath, "r") as f:
         f.readline()
@@ -104,8 +105,8 @@ def extract_user_behaviors(filepath):
                 pos += 1
 
             i += 1
-            if i == 10000:
-                break
+            #if i == 175:
+            #    break
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -316,11 +317,13 @@ def evaluate(model, test_dataset, tag_embeds, U):
     # NOTE: faiss search result index starts from 0, but actual tag_id starts from 1
     idx_2_user_id, user_vecs = [], []
     for user_id, vec in user_embeds.items():
+        print("user_id: ", user_id)
+        print("user_vec: ", vec)
         idx_2_user_id.append(user_id)
         user_vecs.append(vec)
     user_vecs = np.array(user_vecs)
 
-    for K in [1, 5, 10, 20, 50]:
+    for K in [1, 2, 3]:
         dis, neigh = tag_embeds_index.search(user_vecs, K)
         user_true_tags_pred = {}
         for user_idx, _neigh in enumerate(neigh):
