@@ -4,7 +4,7 @@ import tensorflow as tf
 
 
 class UTPM:
-    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred):
+    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred, l2_norm):
         self.E = E
         self.U = U
         self.pad_value = pad_value
@@ -12,6 +12,7 @@ class UTPM:
         self.epochs = epochs
         self.dtype = dtype
         self.use_cross = use_cross
+        self.l2_norm = l2_norm
         self.early_stop_thred = early_stop_thred
         # init embedding weights
         self.all_embeds = {
@@ -47,7 +48,7 @@ class UTPM:
     
          
     def init_trainable_weights(self, shape, name):
-        return tf.Variable(tf.random.truncated_normal(shape, stddev=1.0, dtype=self.dtype),
+        return tf.Variable(tf.random.truncated_normal(shape, stddev=1.0 / shape[1], dtype=self.dtype),
                            dtype=self.dtype,
                            name=name,
                            trainable=True)
@@ -172,22 +173,27 @@ class UTPM:
         if self.use_cross:
             x = self.brute_force_cross(x, self.all_embeds["cross"])
         x = tf.nn.relu(tf.matmul(x, self.fc1))
-        y = tf.nn.relu(tf.matmul(x, self.fc2))
+        batch_user_embeds = tf.nn.relu(tf.matmul(x, self.fc2))
+        
+        if self.l2_norm:
+            batch_user_embeds = batch_user_embeds / tf.expand_dims(tf.norm(batch_user_embeds, ord="euclidean", axis=1), axis=1)
 
-        return y
+        return batch_user_embeds
 
     def forward_with_attention_details(self, batch_samples):
         x, attention_weights = self.attention_forward(batch_samples, return_weights=True)
         if self.use_cross:
             x = self.brute_force_cross(x, self.all_embeds["cross"])
         x = tf.nn.relu(tf.matmul(x, self.fc1))
-        y = tf.nn.relu(tf.matmul(x, self.fc2))
+        batch_user_embeds = tf.nn.relu(tf.matmul(x, self.fc2))
 
-        return y, attention_weights
+        return batch_user_embeds, attention_weights
     
     def loss(self, batch_user_embeds, batch_target_movie_tags, batch_labels):
         # (batch_size, n_tags, U)
         batch_target_tags_embeds = tf.nn.embedding_lookup(self.all_embeds["tag_label"], batch_target_movie_tags)
+        if self.l2_norm:
+            batch_target_tags_embeds = batch_target_tags_embeds / tf.expand_dims(tf.norm(batch_target_tags_embeds, ord="euclidean", axis=1), axis=1)
 
         # (batch_size, )
         y_k = tf.math.sigmoid(tf.reduce_sum(tf.squeeze(tf.matmul(batch_target_tags_embeds, tf.expand_dims(batch_user_embeds, axis=2)), axis=2), axis=1))
@@ -250,9 +256,8 @@ class UTPM:
         """
         tag_ids = tf.constant(range(1, n_tags))
 
-        # tag id will -1 in further query
+        # tag id should -1 in future query
         return tf.nn.embedding_lookup(self.all_embeds["tag_label"], tag_ids).numpy()
-
     
     def save_weights(self, filepath):
         print("Save model weights to {}".format(filepath))

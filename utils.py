@@ -20,11 +20,12 @@ def parse_args():
     argparser.add_argument('--lr', type=float, default=0.001, help="learning rate")
     argparser.add_argument('--log_step', type=int, default=500)
     # turn on this will increase forward function's time complexity a lot
-    argparser.add_argument('--use_cross', type=bool, default=False, help="if use cross layer")
+    argparser.add_argument('--use_cross', type=bool, default=False, help="wheter to use cross layer")
+    argparser.add_argument('--l2_norm', type=bool, default=False, help="whether to use l2 norm for user and tag embedding")
     argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
     argparser.add_argument('--max_tags_per_movie', type=int, default=10, help="max tags per movie")
     argparser.add_argument('--n_list_fea', type=int, default=4, help="number of list features")
-    argparser.add_argument('--early_stop_thred', type=float, default=0.005, help="threshold of epochs loss gap to early stop")
+    argparser.add_argument('--early_stop_thred', type=float, default=0.001, help="threshold of epochs loss gap to early stop")
 
     args = argparser.parse_args()
     
@@ -87,8 +88,6 @@ def extract_movie_cate_relation(filepath):
 def extract_user_behaviors(filepath):
     user_behaviors = {}
     pos, neg = 0, 0
-    # TODO
-    i = 0
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -103,10 +102,7 @@ def extract_user_behaviors(filepath):
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
                 pos += 1
-
-            i += 1
-            #if i == 175:
-            #    break
+    print("n pos behaviors: {}, n neg behaviors: {}".format(pos, neg))
 
     for user_id, behavior in user_behaviors.items():
         # sort behavior by time, use top 80% to build history feature 
@@ -301,12 +297,11 @@ def evaluate(model, test_dataset, tag_embeds, U):
         batch_labels = _sample[6]
 
         for user_id, target_movie_tags, label, user_embed in zip(user_ids, batch_target_movie_tags, batch_labels, batch_user_embeds):
-            # squeeze batch dim -> (U, )
-            _user_id = user_id.numpy()
-            user_embeds[_user_id] = user_embed
-
-            # gather user true interest tags
+            # only evaluate on user true interest
             if label.numpy() == 1:
+                _user_id = user_id.numpy()
+                user_embeds[_user_id] = user_embed
+
                 if _user_id not in user_true_tags:
                     user_true_tags[_user_id] = set()
 
@@ -317,8 +312,6 @@ def evaluate(model, test_dataset, tag_embeds, U):
     # NOTE: faiss search result index starts from 0, but actual tag_id starts from 1
     idx_2_user_id, user_vecs = [], []
     for user_id, vec in user_embeds.items():
-        print("user_id: ", user_id)
-        print("user_vec: ", vec)
         idx_2_user_id.append(user_id)
         user_vecs.append(vec)
     user_vecs = np.array(user_vecs)

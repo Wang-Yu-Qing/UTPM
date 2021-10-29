@@ -17,23 +17,29 @@ if __name__ == "__main__":
 
     movie_tag, n_tags = extract_movie_tag_relation("data/ml-20m/genome-scores.csv", args.max_tags_per_movie)
     movie_cate, cate_encoder, cate_decoder = extract_movie_cate_relation("data/ml-20m/movies.csv")
-    #user_behaviors = extract_user_behaviors("data/ml-20m/ratings.csv")
+    user_behaviors = extract_user_behaviors("data/ml-20m/ratings.csv")
 
-    #train_users, test_users = split_train_test(user_behaviors.keys())
-    #print("Number of train users: {}, number of test users: {}".format(len(train_users), len(test_users)))
-    #with open("train_users.pickle", "wb") as f:
-    #    f.write(pickle.dumps(train_users))
+    train_users, test_users = split_train_test(user_behaviors.keys())
+    print("Number of train users: {}, number of test users: {}".format(len(train_users), len(test_users)))
+    with open("train_users.pickle", "wb") as f:
+        f.write(pickle.dumps(train_users))
     
     with open("train_users.pickle", "rb") as f:
         train_users = pickle.loads(f.read())
 
-    #write_tf_records(train_users, 
-    #                 test_users, 
-    #                 user_behaviors, 
-    #                 movie_tag, 
-    #                 movie_cate, 
-    #                 PAD_VALUE, 
-    #                 args.max_user_samples)
+    with open("test_users.pickle", "wb") as f:
+        f.write(pickle.dumps(test_users))
+    
+    with open("test_users.pickle", "rb") as f:
+        test_users = pickle.loads(f.read())
+
+    write_tf_records(train_users, 
+                     test_users, 
+                     user_behaviors, 
+                     movie_tag, 
+                     movie_cate, 
+                     PAD_VALUE, 
+                     args.max_user_samples)
 
     train_dataset, test_dataset = read_tf_records(args.batch_size)
 
@@ -54,37 +60,15 @@ if __name__ == "__main__":
                  args.log_step, 
                  args.epochs, 
                  args.use_cross,
-                 args.early_stop_thred)
+                 args.early_stop_thred,
+                 args.l2_norm)
     
-    #model.train(train_dataset)
-    #model.save_weights("saved_model.pickle")
-
+    model.train(train_dataset)
+    model.save_weights("saved_model.pickle")
+    
     model.load_weights("saved_model.pickle")
 
-    debug = {}
-    batch_samples = {}
-    for step, _batch_samples in enumerate(train_dataset):
-        # X
-        #batch_samples["user_id"] = _batch_samples[0]
-        batch_samples["pos_tag"] = _batch_samples[1]
-        batch_samples["neg_tag"] = _batch_samples[2]
-        batch_samples["pos_cate"] = _batch_samples[3]
-        batch_samples["neg_cate"] = _batch_samples[4]
-
-        # Y
-        batch_target_movie_tag = _batch_samples[5]
-        batch_labels = _batch_samples[6]
-
-        batch_user_embeds = model.forward(batch_samples)
-        batch_loss = model.loss(batch_user_embeds, batch_target_movie_tag, batch_labels)
-        #print(batch_loss)
-        
-
     tags_embeds = model.query_tags_embeds(n_tags)
-
-    #evaluate(model, test_dataset, tags_embeds, args.U)
+    evaluate(model, test_dataset, tags_embeds, args.U)
     #evaluate(model, train_dataset, tags_embeds, args.U)
-
-
-    
 
