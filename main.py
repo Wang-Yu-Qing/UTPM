@@ -18,6 +18,7 @@ if __name__ == "__main__":
     movie_tag, n_tags = extract_movie_tag_relation("data/ml-20m/genome-scores.csv", args.max_tags_per_movie)
     movie_cate, cate_encoder, cate_decoder = extract_movie_cate_relation("data/ml-20m/movies.csv")
     user_behaviors = extract_user_behaviors("data/ml-20m/ratings.csv")
+    # TODO: increase negative samples size
 
     train_users, test_users = split_train_test(user_behaviors.keys())
     print("Number of train users: {}, number of test users: {}".format(len(train_users), len(test_users)))
