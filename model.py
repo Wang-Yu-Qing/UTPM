@@ -4,7 +4,7 @@ import tensorflow as tf
 
 
 class UTPM:
-    def __init__(self, n_tags, n_cates, n_list_fea, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred, l2_norm):
+    def __init__(self, n_tags, n_cates, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred):
         self.E = E
         self.U = U
         self.pad_value = pad_value
@@ -12,7 +12,6 @@ class UTPM:
         self.epochs = epochs
         self.dtype = dtype
         self.use_cross = use_cross
-        self.l2_norm = l2_norm
         self.early_stop_thred = early_stop_thred
         # init embedding weights
         self.all_embeds = {
@@ -26,10 +25,10 @@ class UTPM:
         # embedding op for padding value lookup
         self.reset_pad_embedding()
 
-        # attention weights
+        # attention weights for tags and cates
         self.Q = self.init_trainable_weights([2, T, 1], "Q")
-        self.W_list_fea = self.init_trainable_weights([2, n_list_fea, E, T], "W")
-        self.B_list_fea = self.init_trainable_weights([2, n_list_fea, T], "B")
+        self.W_list_fea = self.init_trainable_weights([2, 2, E, T], "W")
+        self.B_list_fea = self.init_trainable_weights([2, 2, T], "B")
 
         # fc weights
         if self.use_cross:
@@ -45,7 +44,6 @@ class UTPM:
                                  [self.Q, self.W_list_fea, self.B_list_fea, self.fc1, self.fc2]
         
         self.opt = tf.optimizers.Adam(learning_rate=lr)
-    
          
     def init_trainable_weights(self, shape, name):
         return tf.Variable(tf.random.truncated_normal(shape, stddev=1.0 / shape[1], dtype=self.dtype),
@@ -90,26 +88,11 @@ class UTPM:
         else:
             return res
     
-    def attention_forward(self, batch_features, return_weights=False):
-        batch_single_fea_embeds = []
+    def attention_forward(self, pos_tags, pos_cates, return_weights=False):
         batch_list_fea_embeds = {}
         # query embeddings
-        for key, value in batch_features.items():
-            if key == "user_id":
-                # lookup single fea embeddings
-                batch_single_fea_embeds.append(tf.nn.embedding_lookup(self.all_embeds[key], value))
-            else:
-                # lookup list fea embeddings (with padding)
-                if key == "pos_tag" or key == "neg_tag":
-                    batch_list_fea_embeds[key] = tf.nn.embedding_lookup(self.all_embeds["tag"], value)
-                elif key == "pos_cate" or key == "neg_cate":
-                    batch_list_fea_embeds[key] = tf.nn.embedding_lookup(self.all_embeds["cate"], value)
-                else:
-                    raise InvalidArgumentException("Wrong feature name: {}".format(key)) 
-        
-        if batch_single_fea_embeds:
-            # (batch_size, n_single_fea, E)
-            batch_single_fea_embeds = tf.stack(batch_single_fea_embeds, axis=1) 
+        batch_list_fea_embeds["pos_tag"] = tf.nn.embedding_lookup(self.all_embeds["tag"], pos_tags)
+        batch_list_fea_embeds["pos_cate"] = tf.nn.embedding_lookup(self.all_embeds["cate"], pos_cates)
         
         h0_batch_fea_embeds, h1_batch_fea_embeds,  = [], []
         attention_weights = {}
@@ -121,26 +104,20 @@ class UTPM:
             B = self.B_list_fea[:, i, :]
             
             if return_weights:
-                h0_batch_list_fea_merged, h0_weights = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B, True) # (batch_size, 1, E)
-                h1_batch_list_fea_merged, h1_weights = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B, True) # (batch_size, 1, E)
+                h0_batch_fea_merged, h0_weights = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B, True) # (batch_size, 1, E)
+                h1_batch_fea_merged, h1_weights = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B, True) # (batch_size, 1, E)
                 attention_weights[list_fea_name + "_h0"] = h0_weights
                 attention_weights[list_fea_name + "_h1"] = h1_weights
             else:
                 # merge list feature embeds to produce one embedding for the list feature
-                h0_batch_list_fea_merged = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
-                h1_batch_list_fea_merged = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
+                h0_batch_fea_merged = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
+                h1_batch_fea_merged = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
 
-            if batch_single_fea_embeds:
-                # if has any single value feature, append attention merged list feature's embedding to all feature embeddings
-                h0_batch_fea_embeds = tf.concat([batch_single_fea_embeds, h0_batch_list_fea_merged], axis=1) # (batch_size, n_fea, E)
-                h1_batch_fea_embeds = tf.concat([batch_single_fea_embeds, h1_batch_list_fea_merged], axis=1) # (batch_size, n_fea, E)
-            else:
-                h0_batch_fea_embeds.append(tf.squeeze(h0_batch_list_fea_merged, axis=1))
-                h1_batch_fea_embeds.append(tf.squeeze(h1_batch_list_fea_merged, axis=1))
+            h0_batch_fea_embeds.append(tf.squeeze(h0_batch_fea_merged, axis=1))
+            h1_batch_fea_embeds.append(tf.squeeze(h1_batch_fea_merged, axis=1))
         
-        if not batch_single_fea_embeds:
-            h0_batch_fea_embeds = tf.stack(h0_batch_fea_embeds, axis=1) # (batch_size, n_fea, E)
-            h1_batch_fea_embeds = tf.stack(h1_batch_fea_embeds, axis=1) # (batch_size, n_fea, E)
+        h0_batch_fea_embeds = tf.stack(h0_batch_fea_embeds, axis=1) # (batch_size, n_fea, E)
+        h1_batch_fea_embeds = tf.stack(h1_batch_fea_embeds, axis=1) # (batch_size, n_fea, E)
 
         # merge all feature embeds to produce final embedding
         h0_batch_res = self.head_attention(h0_batch_fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
@@ -168,15 +145,12 @@ class UTPM:
         # (batch_size, 0.5 * x_dim * (x_dim - 1))
         return tf.stack(res, axis=1)
 
-    def forward(self, batch_samples):
-        x = self.attention_forward(batch_samples)
+    def forward(self, pos_tags, pos_cates):
+        x = self.attention_forward(pos_tags, pos_cates)
         if self.use_cross:
             x = self.brute_force_cross(x, self.all_embeds["cross"])
         x = tf.nn.relu(tf.matmul(x, self.fc1))
         batch_user_embeds = tf.nn.relu(tf.matmul(x, self.fc2))
-        
-        if self.l2_norm:
-            batch_user_embeds = batch_user_embeds / tf.expand_dims(tf.norm(batch_user_embeds, ord="euclidean", axis=1), axis=1)
 
         return batch_user_embeds
 
@@ -192,8 +166,6 @@ class UTPM:
     def loss(self, batch_user_embeds, batch_target_movie_tags, batch_labels):
         # (batch_size, n_tags, U)
         batch_target_tags_embeds = tf.nn.embedding_lookup(self.all_embeds["tag_label"], batch_target_movie_tags)
-        if self.l2_norm:
-            batch_target_tags_embeds = batch_target_tags_embeds / tf.expand_dims(tf.norm(batch_target_tags_embeds, ord="euclidean", axis=1), axis=1)
 
         # (batch_size, )
         y_k = tf.math.sigmoid(tf.reduce_sum(tf.squeeze(tf.matmul(batch_target_tags_embeds, tf.expand_dims(batch_user_embeds, axis=2)), axis=2), axis=1))
@@ -210,19 +182,17 @@ class UTPM:
             epoch_total_loss = 0
             for step, _batch_samples in enumerate(train_dataset):
                 tic = time.time()
+                batch_samples["user_id"] = _batch_samples[0]
                 # X
-                #batch_samples["user_id"] = _batch_samples[0]
                 batch_samples["pos_tag"] = _batch_samples[1]
-                batch_samples["neg_tag"] = _batch_samples[2]
-                batch_samples["pos_cate"] = _batch_samples[3]
-                batch_samples["neg_cate"] = _batch_samples[4]
+                batch_samples["pos_cate"] = _batch_samples[2]
 
                 # Y
-                batch_target_movie_tag = _batch_samples[5]
-                batch_labels = _batch_samples[6]
+                batch_target_movie_tag = _batch_samples[3]
+                batch_labels = _batch_samples[4]
 
                 with tf.GradientTape() as tape:
-                    batch_user_embeds = self.forward(batch_samples)
+                    batch_user_embeds = self.forward(batch_samples["pos_tag"], batch_samples["pos_cate"])
                     batch_loss = self.loss(batch_user_embeds, batch_target_movie_tag, batch_labels)
                 
                 epoch_total_loss += batch_loss
@@ -249,6 +219,7 @@ class UTPM:
     def query_tags_embeds(self, n_tags):
         """
             @n_tags: number of tags, including padding id 0
+
             Use trained tag label embedding vecs as tag embeds during prediction.
             Not using tag embedding in the input layer, 
             because the prediction during model training is based on the dot product
