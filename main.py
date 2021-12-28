@@ -53,19 +53,17 @@ if __name__ == "__main__":
                  args.use_cross,
                  args.early_stop_thred)
     
-    model.train(train_dataset)
-    model.save_weights("saved_model.pickle")
+    #model.train(train_dataset)
+    #model.save_weights("saved_model.pickle")
     
     model.load_weights("saved_model.pickle")
     tags_embeds = model.query_tags_embeds(n_tags)
 
     # TODO check user history and future tags similarity
-    user_true_tags = evaluate(model, test_dataset, tags_embeds, args.U)
-
     users_embeds = evaluate(model, test_dataset, tags_embeds, args.U)
     
     tsne(tags_embeds, "tags.png")
     tsne(users_embeds, "users.png")
 
-    #evaluate(model, train_dataset, tags_embeds, args.U)
+    evaluate(model, train_dataset, tags_embeds, args.U)
 

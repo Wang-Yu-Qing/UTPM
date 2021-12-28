@@ -177,23 +177,21 @@ class UTPM:
 
     def train(self, train_dataset):
         last_epoch_avg_loss = float("inf")
-        batch_samples = {}
         for epoch in range(self.epochs):
             epoch_total_loss = 0
             for step, _batch_samples in enumerate(train_dataset):
                 tic = time.time()
-                batch_samples["user_id"] = _batch_samples[0]
+                user_id = _batch_samples[0]
                 # X
-                batch_samples["pos_tag"] = _batch_samples[1]
-                batch_samples["pos_cate"] = _batch_samples[2]
-
+                pos_tag = _batch_samples[1]
+                pos_cate = _batch_samples[2]
                 # Y
-                batch_target_movie_tag = _batch_samples[3]
-                batch_labels = _batch_samples[4]
+                target_movie_tag = _batch_samples[3]
+                labels = _batch_samples[4]
 
                 with tf.GradientTape() as tape:
-                    batch_user_embeds = self.forward(batch_samples["pos_tag"], batch_samples["pos_cate"])
-                    batch_loss = self.loss(batch_user_embeds, batch_target_movie_tag, batch_labels)
+                    user_embeds = self.forward(pos_tag, pos_cate)
+                    batch_loss = self.loss(user_embeds, target_movie_tag, labels)
                 
                 epoch_total_loss += batch_loss
                 epoch_avg_loss = epoch_total_loss / (step + 1)

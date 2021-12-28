@@ -31,7 +31,7 @@ def parse_args():
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
     argparser.add_argument('--early_stop_thred', type=float, default=0.00001, help="threshold of epochs loss gap to early stop")
     argparser.add_argument('--n_neg', type=int, default=5, help="number of additional negative samples per positive sample")
-    argparser.add_argument('--prepare_tfrecords', type=bool, help="whether to prepare tfrecords, need be set to True for first run.")
+    argparser.add_argument('--prepare_tfrecords', type=int, help="whether to prepare tfrecords, need be set to 1 for first run.")
 
     args = argparser.parse_args()
     
@@ -282,17 +282,21 @@ def evaluate(model, test_dataset, tag_embeds, U):
 
     # query each user's embedding using trained model
     user_embeds, sample, user_true_tags = {}, {}, {}
-    for _sample in test_dataset:
-        user_ids = _sample[0]
-        sample["pos_tag"] = _sample[1]
-        sample["pos_cate"] = _sample[2]
 
-        batch_user_embeds = model.forward(sample)
-        
-        batch_target_movie_tags = _sample[3]
-        batch_labels = _sample[4]
+    for _batch_samples in test_dataset:
+        user_ids = _batch_samples[0]
+        # X
+        pos_tag = _batch_samples[1]
+        pos_cate = _batch_samples[2]
 
-        for user_id, target_movie_tags, label, user_embed in zip(user_ids, batch_target_movie_tags, batch_labels, batch_user_embeds):
+        # Y
+        target_movie_tags = _batch_samples[3]
+        labels = _batch_samples[4]
+
+        with tf.GradientTape() as tape:
+            _user_embeds = model.forward(pos_tag, pos_cate)
+
+        for user_id, target_movie_tags, label, user_embed in zip(user_ids, target_movie_tags, labels, _user_embeds):
             # only evaluate on user true interest
             if label.numpy() == 1:
                 _user_id = user_id.numpy()
@@ -305,8 +309,6 @@ def evaluate(model, test_dataset, tag_embeds, U):
                 for tag in true_tags:
                     user_true_tags[_user_id].add(tag)
 
-    # TODO:
-    return user_true_tags
     # NOTE: faiss search result index starts from 0, but actual tag_id starts from 1
     idx_2_user_id, user_vecs = [], []
     for user_id, vec in user_embeds.items():
