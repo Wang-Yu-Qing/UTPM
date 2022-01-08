@@ -29,9 +29,7 @@ epoch: 000 | current_step: 01000 | current_batch_loss: 0.7049 | epoch_avg_loss: 
 ......
 ```
 
-To change config, pass arguments when launch main.py, check utils.py for arguments details.
-
-For example, run the model with cpu, batch size of 64 and max samples per user being 20:
+To change the default config, pass arguments when launch main.py, check utils.py for arguments details.
 
 ## Evaluation (Currently cannot reproduce the result in paper.)
 precision@1: 0.00329352153456388
