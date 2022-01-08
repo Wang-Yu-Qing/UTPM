@@ -38,32 +38,31 @@ if __name__ == "__main__":
     n_cates = len(cate_decoder)
     print("Numer of tags: {}, number cates: {}".format(n_tags, n_cates))
 
-    model = UTPM(n_tags, 
-                 n_cates, 
-                 args.E, 
-                 args.T, 
-                 args.D, 
-                 args.C, 
-                 args.U, 
-                 DTYPE, 
-                 PAD_VALUE, 
-                 args.lr, 
-                 args.log_step, 
-                 args.epochs, 
-                 args.use_cross,
-                 args.early_stop_thred)
+    model = UTPM(
+        n_tags, 
+        n_cates, 
+        args.E, 
+        args.T, 
+        args.D, 
+        args.C, 
+        args.U, 
+        DTYPE, 
+        PAD_VALUE, 
+        args.lr, 
+        args.log_step, 
+        args.epochs, 
+        args.use_cross
+    )
     
-    #model.train(train_dataset)
-    #model.save_weights("saved_model.pickle")
+    model.train(train_dataset)
+    model.save_weights("saved_model.pickle")
     
     model.load_weights("saved_model.pickle")
     tags_embeds = model.query_tags_embeds(n_tags)
 
     # TODO check user history and future tags similarity
     users_embeds = evaluate(model, test_dataset, tags_embeds, args.U)
-    
     tsne(tags_embeds, "tags.png")
     tsne(users_embeds, "users.png")
 
-    evaluate(model, train_dataset, tags_embeds, args.U)
 

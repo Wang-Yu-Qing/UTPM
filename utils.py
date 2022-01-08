@@ -11,17 +11,16 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
 
-
 def parse_args():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--epochs', type=int, default=20)
+    argparser.add_argument('--epochs', type=int, default=10)
     argparser.add_argument('--batch_size', type=int, default=64)
     argparser.add_argument('--E', type=int, default=16)
     argparser.add_argument('--T', type=int, default=8)
     argparser.add_argument('--U', type=int, default=16)
     argparser.add_argument('--C', type=int, default=4)
     argparser.add_argument('--D', type=int, default=32)
-    argparser.add_argument('--lr', type=float, default=0.001, help="learning rate")
+    argparser.add_argument('--lr', type=float, default=0.0005, help="learning rate")
     argparser.add_argument('--log_step', type=int, default=500)
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
@@ -29,23 +28,21 @@ def parse_args():
     argparser.add_argument('--max_tags_per_movie', type=int, default=3, help="max tags per movie")
     argparser.add_argument('--n_values_per_field', type=int, default=10, help="number of values per field")
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
-    argparser.add_argument('--early_stop_thred', type=float, default=0.00001, help="threshold of epochs loss gap to early stop")
-    argparser.add_argument('--n_neg', type=int, default=5, help="number of additional negative samples per positive sample")
-    argparser.add_argument('--prepare_tfrecords', type=int, help="whether to prepare tfrecords, need be set to 1 for first run.")
+    argparser.add_argument('--prepare_tfrecords', default=1, type=int, help="whether to prepare tfrecords, need be set to 1 for first run.")
 
     args = argparser.parse_args()
     
     return args
 
 
-def extract_tags(tag_scores, movie_tag_rel, last_movie_id, top):
+def extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags):
     # as decribed by the paper, restrict max number of tags for each movie
-    tags = sorted(tag_scores, key=lambda x: x[1], reverse=True)[:top]
+    tags = sorted(tag_scores, key=lambda x: x[1], reverse=True)[:n_max_tags]
     movie_tag_rel[last_movie_id] = [x[0] for x in tags]
     tag_scores.clear()
 
 
-def extract_movie_tag_relation(filepath, top):
+def extract_movie_tag_relation(filepath, n_max_tags):
     movie_tag_rel = {}
     max_tag_id = 0
     with open(filepath, "r") as f:
@@ -58,12 +55,12 @@ def extract_movie_tag_relation(filepath, top):
             # use 0 as padding value, make sure original id not starting from 0
             tag_id += 1
             if last_movie_id is not None and movie_id != last_movie_id:
-                extract_tags(tag_scores, movie_tag_rel, last_movie_id, top)
+                extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags)
             tag_scores.append((tag_id, score))
             last_movie_id = movie_id
             max_tag_id = max(max_tag_id, tag_id)
         
-        extract_tags(tag_scores, movie_tag_rel, last_movie_id, top)
+        extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags)
 
     return movie_tag_rel, max_tag_id + 1
 
@@ -94,7 +91,6 @@ def extract_movie_cate_relation(filepath):
 
 def extract_user_behaviors(ratings_filepath):
     user_behaviors = {}
-    pos, neg = 0, 0
     
     with open(ratings_filepath, "r") as f:
         f.readline()
@@ -173,7 +169,9 @@ def build_user_samples(user_id, movie_tag_rel, movie_cate_rel, user_behavior, po
     for movie_id, label, timestamp in history:
         extract_pos_tags_cates(movie_id, label, his_pos_tags, his_pos_cates, movie_tag_rel, movie_cate_rel)
     # as described by the paper, restrict max samples for each user
-    future = random.choices(future, k=max_user_samples)
+    if len(future) > max_user_samples:
+        future = random.choices(future, k=max_user_samples)
+
     for movie_id, label, timestamp in future:
         # one movie produce (tags, label)
         extract_tags_labels(movie_id, label, tags_labels, movie_tag_rel)
@@ -293,8 +291,7 @@ def evaluate(model, test_dataset, tag_embeds, U):
         target_movie_tags = _batch_samples[3]
         labels = _batch_samples[4]
 
-        with tf.GradientTape() as tape:
-            _user_embeds = model.forward(pos_tag, pos_cate)
+        _user_embeds = model.forward(pos_tag, pos_cate)
 
         for user_id, target_movie_tags, label, user_embed in zip(user_ids, target_movie_tags, labels, _user_embeds):
             # only evaluate on user true interest
@@ -322,8 +319,7 @@ def evaluate(model, test_dataset, tag_embeds, U):
         for user_idx, _neigh in enumerate(neigh):
             user_id = idx_2_user_id[user_idx]
             user_true_tags_pred[user_id] = []
-            for _tag_id in _neigh:
-                tag_id = _tag_id + 1
+            for tag_id in _neigh:
                 user_true_tags_pred[user_id].append(tag_id)
         
         print("precision@{}: {}".format(K, precision_at_K(user_true_tags_pred, user_true_tags, K)))
@@ -332,7 +328,7 @@ def evaluate(model, test_dataset, tag_embeds, U):
 
 
 def precision_at_K(user_true_tags_pred, user_true_tags, K):
-    res = 0
+    res, n_valid_user = 0, 0
     for user_id, pred_tags in user_true_tags_pred.items():
         hit = 0
         if user_id in user_true_tags:
@@ -341,8 +337,9 @@ def precision_at_K(user_true_tags_pred, user_true_tags, K):
                 if tag in true_tags:
                     hit += 1
             res += (hit / min(K, len(true_tags)))
+            n_valid_user += 1
     
-    return res / len(user_true_tags_pred)
+    return res / n_valid_user
 
 
 def tsne(embeds, filename):

@@ -4,7 +4,7 @@ import tensorflow as tf
 
 
 class UTPM:
-    def __init__(self, n_tags, n_cates, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross, early_stop_thred):
+    def __init__(self, n_tags, n_cates, E, T, D, C, U, dtype, pad_value, lr, log_step, epochs, use_cross):
         self.E = E
         self.U = U
         self.pad_value = pad_value
@@ -12,7 +12,6 @@ class UTPM:
         self.epochs = epochs
         self.dtype = dtype
         self.use_cross = use_cross
-        self.early_stop_thred = early_stop_thred
         # init embedding weights
         self.all_embeds = {
             "tag": self.init_trainable_weights([n_tags, E], "tag_embeds"),
@@ -151,6 +150,7 @@ class UTPM:
             x = self.brute_force_cross(x, self.all_embeds["cross"])
         x = tf.nn.relu(tf.matmul(x, self.fc1))
         batch_user_embeds = tf.nn.relu(tf.matmul(x, self.fc2))
+        batch_user_embeds = tf.math.l2_normalize(batch_user_embeds, axis=1)
 
         return batch_user_embeds
 
@@ -166,7 +166,7 @@ class UTPM:
     def loss(self, batch_user_embeds, batch_target_movie_tags, batch_labels):
         # (batch_size, n_tags, U)
         batch_target_tags_embeds = tf.nn.embedding_lookup(self.all_embeds["tag_label"], batch_target_movie_tags)
-
+        batch_target_tags_embeds = tf.math.l2_normalize(batch_target_tags_embeds, axis=1)
         # (batch_size, )
         y_k = tf.math.sigmoid(tf.reduce_sum(tf.squeeze(tf.matmul(batch_target_tags_embeds, tf.expand_dims(batch_user_embeds, axis=2)), axis=2), axis=1))
         # log(x) needs x > 0 for both x = y_k and x = 1 - y_k
@@ -208,10 +208,6 @@ class UTPM:
 
             print("Epoch {} done, epoch avg loss: {}".format(epoch + 1, epoch_avg_loss))
 
-            if last_epoch_avg_loss - epoch_avg_loss < self.early_stop_thred:
-                print("Early stop")
-                break
-
             last_epoch_avg_loss = epoch_avg_loss
 
     def query_tags_embeds(self, n_tags):
@@ -223,10 +219,7 @@ class UTPM:
             because the prediction during model training is based on the dot product
             of the movie's tags label embeddings.
         """
-        tag_ids = tf.constant(range(1, n_tags))
-
-        # tag id should -1 in future query
-        return tf.nn.embedding_lookup(self.all_embeds["tag_label"], tag_ids).numpy()
+        return tf.math.l2_normalize(self.all_embeds["tag_label"], axis=1).numpy()
     
     def save_weights(self, filepath):
         print("Save model weights to {}".format(filepath))

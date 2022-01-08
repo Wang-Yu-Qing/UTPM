@@ -9,7 +9,7 @@ Create data folder, unzip and move the dataset into the folder
 Run with default config
 
 ```
-python main.py
+python main.py --prepare_tfrecords 1
 ```
 
 If everything is properly set, you should see outputs like the following:
@@ -33,9 +33,12 @@ To change config, pass arguments when launch main.py, check utils.py for argumen
 
 For example, run the model with cpu, batch size of 64 and max samples per user being 20:
 
-```
-python main.py --gpu False --batch_size 64 --max_user_samples 20
-```
+## Evaluation (Currently cannot reproduce the result in paper.)
+precision@1: 0.00329352153456388
 
-## Evaluation
+precision@2: 0.0050488599348534205
+
+precision@3: 0.005537459283387622
+
+
 
