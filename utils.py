@@ -25,7 +25,7 @@ def parse_args():
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
     argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
-    argparser.add_argument('--max_tags_per_movie', type=int, default=3, help="max tags per movie")
+    argparser.add_argument('--max_tags_per_movie', type=int, default=5, help="max tags per movie")
     argparser.add_argument('--min_tag_score', type=float, default=0.9, help="min tag score")
     argparser.add_argument('--n_values_per_field', type=int, default=10, help="number of values per field")
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
@@ -196,6 +196,9 @@ def build_user_samples(user_id, movie_tag_rel, movie_cate_rel, user_behavior, po
             ]
         for target_tags_label in tags_labels
     ]
+    
+    for sample in user_samples:
+        print(len(sample[3]))
 
     return user_samples
 
@@ -237,7 +240,7 @@ def parse_single_sample(user_id, pos_tags, pos_cates, target_tags, label):
         'pos_cates':  _bytes_feature(serialize_array(pos_cates)),
         'target_movie_tags': _bytes_feature(serialize_array(target_tags)),
         'label':  _float_feature(label)
-  }
+    }
 
   return tf.train.Example(features=tf.train.Features(feature=data))
 

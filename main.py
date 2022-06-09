@@ -27,6 +27,7 @@ if __name__ == "__main__":
             PAD_VALUE
         )
         print("Samples build done.")
+        exit(0)
         # randomly split train and test users and their samples
         train_samples, test_samples = split_train_test(all_users_samples)
         print("Start writing tf records.")
@@ -34,7 +35,6 @@ if __name__ == "__main__":
         write_tf_records(test_samples, 'data/test_samples.tfrecords')
 
     train_dataset, test_dataset = read_tf_records(args.batch_size)
-    exit(0)
 
     n_cates = len(cate_decoder)
     print("Numer of tags: {}, number cates: {}".format(n_tags, n_cates))
