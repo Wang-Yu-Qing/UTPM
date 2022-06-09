@@ -26,6 +26,7 @@ def parse_args():
     argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
     argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
     argparser.add_argument('--max_tags_per_movie', type=int, default=3, help="max tags per movie")
+    argparser.add_argument('--min_tag_score', type=float, default=0.9, help="min tag score")
     argparser.add_argument('--n_values_per_field', type=int, default=10, help="number of values per field")
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
     argparser.add_argument('--prepare_tfrecords', default=1, type=int, help="whether to prepare tfrecords, need be set to 1 for first run.")
@@ -35,14 +36,15 @@ def parse_args():
     return args
 
 
-def extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags):
+def extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags, min_tag_score):
     # as decribed by the paper, restrict max number of tags for each movie
     tags = sorted(tag_scores, key=lambda x: x[1], reverse=True)[:n_max_tags]
-    movie_tag_rel[last_movie_id] = [x[0] for x in tags]
+    # and only keep tags score higher than thred
+    movie_tag_rel[last_movie_id] = [x[0] for x in tags if x[1] > min_tag_score]
     tag_scores.clear()
 
 
-def extract_movie_tag_relation(filepath, n_max_tags):
+def extract_movie_tag_relation(filepath, n_max_tags, min_tag_score):
     movie_tag_rel = {}
     max_tag_id = 0
     with open(filepath, "r") as f:
@@ -55,12 +57,17 @@ def extract_movie_tag_relation(filepath, n_max_tags):
             # use 0 as padding value, make sure original id not starting from 0
             tag_id += 1
             if last_movie_id is not None and movie_id != last_movie_id:
-                extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags)
+                extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags, min_tag_score)
             tag_scores.append((tag_id, score))
             last_movie_id = movie_id
             max_tag_id = max(max_tag_id, tag_id)
         
-        extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags)
+        extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags, min_tag_score)
+
+    # filter out movies that has no tags
+    movies_to_remove = [x[0] for x in movie_tag_rel.items() if not x[1]]
+    for movie_id in movies_to_remove:
+        del movie_tag_rel[movie_id]
 
     return movie_tag_rel, max_tag_id + 1
 

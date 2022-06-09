@@ -12,7 +12,7 @@ NUM_WORKERS = 4
 
 if __name__ == "__main__":
     args = parse_args() 
-    movie_tag_rel, n_tags = extract_movie_tag_relation("data/ml-20m/genome-scores.csv", args.max_tags_per_movie)
+    movie_tag_rel, n_tags = extract_movie_tag_relation("data/ml-20m/genome-scores.csv", args.max_tags_per_movie, args.min_tag_score)
     movie_cate_rel, cate_encoder, cate_decoder = extract_movie_cate_relation("data/ml-20m/movies.csv")
     if args.prepare_tfrecords:
         print("Start building user samples")
@@ -34,6 +34,7 @@ if __name__ == "__main__":
         write_tf_records(test_samples, 'data/test_samples.tfrecords')
 
     train_dataset, test_dataset = read_tf_records(args.batch_size)
+    exit(0)
 
     n_cates = len(cate_decoder)
     print("Numer of tags: {}, number cates: {}".format(n_tags, n_cates))
