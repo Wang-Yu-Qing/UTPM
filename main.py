@@ -1,5 +1,3 @@
-import pickle
-import numpy as np
 import tensorflow as tf
 from utils import *
 from model import UTPM
@@ -12,7 +10,8 @@ NUM_WORKERS = 4
 
 if __name__ == "__main__":
     args = parse_args() 
-    movie_tag_rel, n_tags = extract_movie_tag_relation("data/ml-20m/genome-scores.csv", args.max_tags_per_movie, args.min_tag_score)
+    movie_tag_rel, tag_encoder, tag_decoder = extract_movie_tag_relation("data/ml-20m/genome-scores.csv", args.tags_per_movie, args.min_tag_score, args.min_tag_freq)
+
     movie_cate_rel, cate_encoder, cate_decoder = extract_movie_cate_relation("data/ml-20m/movies.csv")
     if args.prepare_tfrecords:
         print("Start building user samples")
@@ -23,11 +22,11 @@ if __name__ == "__main__":
             NUM_WORKERS, 
             0.8, 
             args.max_user_samples, 
+            args.min_movies_per_user,
             args.n_values_per_field, 
             PAD_VALUE
         )
         print("Samples build done.")
-        exit(0)
         # randomly split train and test users and their samples
         train_samples, test_samples = split_train_test(all_users_samples)
         print("Start writing tf records.")
@@ -36,12 +35,9 @@ if __name__ == "__main__":
 
     train_dataset, test_dataset = read_tf_records(args.batch_size)
 
-    n_cates = len(cate_decoder)
-    print("Numer of tags: {}, number cates: {}".format(n_tags, n_cates))
-
     model = UTPM(
-        n_tags, 
-        n_cates, 
+        len(tag_decoder),
+        len(cate_decoder),
         args.E, 
         args.T, 
         args.D, 
@@ -57,13 +53,14 @@ if __name__ == "__main__":
     
     model.train(train_dataset)
     model.save_weights("saved_model.pickle")
-    
     model.load_weights("saved_model.pickle")
-    tags_embeds = model.query_tags_embeds(n_tags)
+
+    # tag raw id -> embedding
+    tags_embeds = {}
+    for encoded_tag_id, tag_embed in enumerate(model.query_tags_embeds()):
+        tags_embeds[tag_decoder[encoded_tag_id]] = tag_embed
 
     # TODO check user history and future tags similarity
     users_embeds = evaluate(model, test_dataset, tags_embeds, args.U)
-    tsne(tags_embeds, "tags.png")
+    tsne(np.array(tags_embeds.values()), "tags.png")
     tsne(users_embeds, "users.png")
-
-
