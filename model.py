@@ -198,7 +198,7 @@ class UTPM:
 
                 toc = time.time()
                 if step % self.log_step == 0:
-                    print("epoch: {:03d} | current_step: {:05d} | current_batch_loss: {:.4f} | epoch_avg_loss: {:.4f} | step_time: {:.5f}".\
+                    print("epoch: {:03d} | step: {:05d} | batch_loss: {:.4f} | epoch_avg_loss: {:.4f} | step_time: {:.5f}".\
                         format(epoch + 1, step, batch_loss, epoch_avg_loss, toc - tic))
 
                 grads = tape.gradient(batch_loss, self.trainable_weights)
@@ -210,14 +210,14 @@ class UTPM:
 
             last_epoch_avg_loss = epoch_avg_loss
 
-    def query_tags_embeds(self, n_tags):
+    def query_tags_embeds(self):
         """
-            @n_tags: number of tags, including padding id 0
-
             Use trained tag label embedding vecs as tag embeds during prediction.
             Not using tag embedding in the input layer, 
             because the prediction during model training is based on the dot product
             of the movie's tags label embeddings.
+
+            return tag embedding table, idx is encoded id
         """
         return tf.math.l2_normalize(self.all_embeds["tag_label"], axis=1).numpy()
     
@@ -240,6 +240,3 @@ class UTPM:
             self.B_list_fea = weights[5]
             self.fc1 = weights[6]
             self.fc2 = weights[7]
-        
-    
-            
