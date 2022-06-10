@@ -1,4 +1,3 @@
-from re import split
 import faiss
 import random
 import argparse
@@ -6,47 +5,69 @@ import numpy as np
 import tensorflow as tf
 import multiprocessing
 from itertools import repeat
-from sklearn.model_selection import train_test_split
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
 
 def parse_args():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--epochs', type=int, default=10)
+    argparser.add_argument('--epochs', type=int, default=20)
     argparser.add_argument('--batch_size', type=int, default=64)
     argparser.add_argument('--E', type=int, default=16)
     argparser.add_argument('--T', type=int, default=8)
     argparser.add_argument('--U', type=int, default=16)
     argparser.add_argument('--C', type=int, default=4)
     argparser.add_argument('--D', type=int, default=32)
-    argparser.add_argument('--lr', type=float, default=0.0005, help="learning rate")
+    argparser.add_argument('--lr', type=float, default=0.01, help="learning rate")
     argparser.add_argument('--log_step', type=int, default=500)
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
     argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
-    argparser.add_argument('--max_tags_per_movie', type=int, default=5, help="max tags per movie")
-    argparser.add_argument('--min_tag_score', type=float, default=0.9, help="min tag score")
+    argparser.add_argument('--min_movies_per_user', type=int, default=60, help="min movies for a valid user")
+    argparser.add_argument('--tags_per_movie', type=int, default=5, help="tags per movie")
+    argparser.add_argument('--min_tag_score', type=float, default=0.85, help="min tag score")
+    argparser.add_argument('--min_tag_freq', type=int, default=5, help="min tag freq")
     argparser.add_argument('--n_values_per_field', type=int, default=10, help="number of values per field")
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
     argparser.add_argument('--prepare_tfrecords', default=1, type=int, help="whether to prepare tfrecords, need be set to 1 for first run.")
 
     args = argparser.parse_args()
-    
+
     return args
 
 
-def extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags, min_tag_score):
+def extract_tags(tag_scores, movie_tag_rel, last_movie_id, tags_per_movie, min_tag_score):
     # as decribed by the paper, restrict max number of tags for each movie
-    tags = sorted(tag_scores, key=lambda x: x[1], reverse=True)[:n_max_tags]
+    tags = sorted(tag_scores, key=lambda x: x[1], reverse=True)[:tags_per_movie]
     # and only keep tags score higher than thred
-    movie_tag_rel[last_movie_id] = [x[0] for x in tags if x[1] > min_tag_score]
+    movie_tag_rel[last_movie_id] = set([x[0] for x in tags if x[1] > min_tag_score])
     tag_scores.clear()
 
 
-def extract_movie_tag_relation(filepath, n_max_tags, min_tag_score):
+def filter_movie_tag(movie_tag_rel, min_tag_freq, tags_per_movie):
+    # filter out tags that cover too little movies
+    tag_freq = {}
+    for movie_id, tags in movie_tag_rel.items():
+        for tag in tags:
+            try:
+                tag_freq[tag] += 1
+            except KeyError:
+                tag_freq[tag] = 1
+    valid_tags = set([x[0] for x in tag_freq.items() if x[1] >= min_tag_freq])
+
+    # filter out invalid tags from movies, and drop movies whose tag number is not enough
+    invalid_movies = set()
+    for movie_id, tags in movie_tag_rel.items():
+        # filter out invalid tags from movie
+        movie_tag_rel[movie_id] = [x for x in tags if x in valid_tags]
+        if len(movie_tag_rel[movie_id]) < tags_per_movie:
+            invalid_movies.add(movie_id)
+
+    return {x[0]: x[1] for x in movie_tag_rel.items() if x[0] not in invalid_movies}
+
+
+def extract_movie_tag_relation(filepath, tags_per_movie, min_tag_score, min_tag_freq):
     movie_tag_rel = {}
-    max_tag_id = 0
     with open(filepath, "r") as f:
         f.readline()
         last_movie_id, tag_scores = None, []
@@ -55,21 +76,30 @@ def extract_movie_tag_relation(filepath, n_max_tags, min_tag_score):
             splitted = line.split(",")
             movie_id, tag_id, score = int(splitted[0]), int(splitted[1]), float(splitted[2])
             # use 0 as padding value, make sure original id not starting from 0
-            tag_id += 1
             if last_movie_id is not None and movie_id != last_movie_id:
-                extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags, min_tag_score)
+                extract_tags(tag_scores, movie_tag_rel, last_movie_id, tags_per_movie, min_tag_score)
             tag_scores.append((tag_id, score))
             last_movie_id = movie_id
-            max_tag_id = max(max_tag_id, tag_id)
         
-        extract_tags(tag_scores, movie_tag_rel, last_movie_id, n_max_tags, min_tag_score)
+        extract_tags(tag_scores, movie_tag_rel, last_movie_id, tags_per_movie, min_tag_score)
 
-    # filter out movies that has no tags
-    movies_to_remove = [x[0] for x in movie_tag_rel.items() if not x[1]]
-    for movie_id in movies_to_remove:
-        del movie_tag_rel[movie_id]
+    # filter
+    movie_tag_rel = filter_movie_tag(movie_tag_rel, min_tag_freq, tags_per_movie)    
 
-    return movie_tag_rel, max_tag_id + 1
+    # encode tags
+    tag_encoder, tag_decoder, tag_id = {"<pad>": 0}, ["<pad>"], 1
+    for movie_id, raw_tags in movie_tag_rel.items():
+        encoded_tags = []
+        for raw_tag_id in raw_tags:
+            if raw_tag_id not in tag_encoder:
+                tag_encoder[raw_tag_id] = tag_id
+                tag_decoder.append(raw_tag_id)
+                tag_id += 1
+            
+            encoded_tags.append(tag_encoder[raw_tag_id])
+        movie_tag_rel[movie_id] = encoded_tags
+
+    return movie_tag_rel, tag_encoder, tag_decoder
 
 
 def extract_movie_cate_relation(filepath):
@@ -96,7 +126,7 @@ def extract_movie_cate_relation(filepath):
     return movie_cate_rel, cate_encoder, cate_decoder
 
 
-def extract_user_behaviors(ratings_filepath):
+def extract_user_behaviors(ratings_filepath, min_movies_per_user):
     user_behaviors = {}
     
     with open(ratings_filepath, "r") as f:
@@ -111,11 +141,17 @@ def extract_user_behaviors(ratings_filepath):
                 user_behaviors[user_id].append((movie_id, 0, timestamp))
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
+    
+    # filter out users that has too little movies
+    invalid_users = set([x[0] for x in user_behaviors.items() if len(x[1]) < min_movies_per_user])
 
-    return user_behaviors
+    return {x[0]: x[1] for x in user_behaviors.items() if x[0] not in invalid_users}
 
 
 def extract_pos_tags_cates(movie_id, label, pos_tags, pos_cates, movie_tag_rel, movie_cate_rel):
+    """
+        Tags can be repeated. Repeated tags will contribute stronger singnal for user tag interest
+    """
     try:
         tags, cates = movie_tag_rel[movie_id], movie_cate_rel[movie_id]
     except KeyError:
@@ -144,8 +180,8 @@ def pad_or_cut(values, pad_value, length):
         return values
 
 
-def build_user_samples_mp(ratings_filepath, movie_tag_rel, movie_cate_rel, num_workers, portion, max_user_samples, n_values_per_field, pad_value):
-    user_behaviors = extract_user_behaviors(ratings_filepath)
+def build_user_samples_mp(ratings_filepath, movie_tag_rel, movie_cate_rel, num_workers, portion, max_user_samples, min_movies_per_user, n_values_per_field, pad_value):
+    user_behaviors = extract_user_behaviors(ratings_filepath, min_movies_per_user)
     with multiprocessing.Pool(num_workers) as pool:
         all_samples = pool.starmap(
             build_user_samples, 
@@ -172,33 +208,27 @@ def build_user_samples(user_id, movie_tag_rel, movie_cate_rel, user_behavior, po
     history, future = user_behavior[:split_idx], user_behavior[split_idx:]
     # extract history postive tags and cates
     his_pos_tags, his_pos_cates = [], []
-    tags_labels = []
     for movie_id, label, timestamp in history:
         extract_pos_tags_cates(movie_id, label, his_pos_tags, his_pos_cates, movie_tag_rel, movie_cate_rel)
     # as described by the paper, restrict max samples for each user
     if len(future) > max_user_samples:
         future = random.choices(future, k=max_user_samples)
 
+    tags_labels = []
     for movie_id, label, timestamp in future:
         # one movie produce (tags, label)
         extract_tags_labels(movie_id, label, tags_labels, movie_tag_rel)
 
-    # as described by the paper, fix number of feature values for each field and number of feature fields is 2
-    # randomly draw pos tags and cates from history tags for each sample
     user_samples = [
-        # TODO: use most recent?
-            [
-                user_id,
-                pad_or_cut(his_pos_tags, pad_value, n_values_per_field), 
-                pad_or_cut(his_pos_cates, pad_value, n_values_per_field), 
-                target_tags_label[0],
-                target_tags_label[1]
-            ]
+        [
+            user_id,
+            pad_or_cut(his_pos_tags, pad_value, n_values_per_field), 
+            pad_or_cut(his_pos_cates, pad_value, n_values_per_field), 
+            target_tags_label[0],
+            target_tags_label[1]
+        ]
         for target_tags_label in tags_labels
     ]
-    
-    for sample in user_samples:
-        print(len(sample[3]))
 
     return user_samples
 
@@ -282,11 +312,16 @@ def read_tf_records(batch_size):
     
 
 def evaluate(model, test_dataset, tag_embeds, U):
-    # create tag embedding vecs index for similarity search
-    # using brute-force dot-product as similarity
+    # idx -> raw tag id
+    idx_2_tag_id, tag_vecs = [], []
+    for tag_id, vec in tag_embeds.items():
+        idx_2_tag_id.append(tag_id)
+        tag_vecs.append(vec)
+    tag_vecs = np.array(tag_vecs)
+
+    # create tag embedding vecs index for similarity search using brute-force dot-product as similarity
     tag_embeds_index = faiss.IndexFlatIP(U)
-    # id will -1 in neigh search
-    tag_embeds_index.add(tag_embeds)
+    tag_embeds_index.add(tag_vecs)
 
     # query each user's embedding using trained model
     user_embeds, sample, user_true_tags = {}, {}, {}
@@ -306,17 +341,17 @@ def evaluate(model, test_dataset, tag_embeds, U):
         for user_id, target_movie_tags, label, user_embed in zip(user_ids, target_movie_tags, labels, _user_embeds):
             # only evaluate on user true interest
             if label.numpy() == 1:
-                _user_id = user_id.numpy()
-                user_embeds[_user_id] = user_embed
+                user_id = user_id.numpy()
+                user_embeds[user_id] = user_embed
 
-                if _user_id not in user_true_tags:
-                    user_true_tags[_user_id] = set()
+                if user_id not in user_true_tags:
+                    user_true_tags[user_id] = set()
 
                 true_tags = target_movie_tags.numpy()
                 for tag in true_tags:
-                    user_true_tags[_user_id].add(tag)
+                    user_true_tags[user_id].add(tag)
 
-    # NOTE: faiss search result index starts from 0, but actual tag_id starts from 1
+    # NOTE: faiss search result is returned with vector index in the array
     idx_2_user_id, user_vecs = [], []
     for user_id, vec in user_embeds.items():
         idx_2_user_id.append(user_id)
@@ -329,8 +364,8 @@ def evaluate(model, test_dataset, tag_embeds, U):
         for user_idx, _neigh in enumerate(neigh):
             user_id = idx_2_user_id[user_idx]
             user_true_tags_pred[user_id] = []
-            for tag_id in _neigh:
-                user_true_tags_pred[user_id].append(tag_id)
+            for idx in _neigh:
+                user_true_tags_pred[user_id].append(idx_2_tag_id[idx])
         
         print("precision@{}: {}".format(K, precision_at_K(user_true_tags_pred, user_true_tags, K)))
 
