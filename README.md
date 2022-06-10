@@ -3,7 +3,7 @@ Code for paper: [Learning to Build User-tag Profile in Recommendation System](ht
 
 ## Dataset
 Download link: [MovieLens 20M](https://grouplens.org/datasets/movielens/20m/)
-Create data folder, unzip and move the dataset into the folder
+Create `data` folder, unzip and move the dataset into the folder
 
 ## Run the model
 Run with default config
