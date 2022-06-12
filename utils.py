@@ -20,20 +20,38 @@ def parse_args():
     argparser.add_argument('--D', type=int, default=32)
     argparser.add_argument('--lr', type=float, default=0.01, help="learning rate")
     argparser.add_argument('--log_step', type=int, default=500)
+    argparser.add_argument('--pad_value', type=int, default=0)
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
-    argparser.add_argument('--max_user_samples', type=int, default=10, help="max samples per user")
+    argparser.add_argument('--user_frac', default=0.5, type=int, help="fraction of users to be used in training and testing")
+    argparser.add_argument('--max_user_samples', type=int, default=20, help="max labels per user")
     argparser.add_argument('--min_movies_per_user', type=int, default=60, help="min movies for a valid user")
-    argparser.add_argument('--tags_per_movie', type=int, default=5, help="tags per movie")
+    argparser.add_argument('--max_movies_per_user', type=int, default=150, help="max movies for a valid user")
+    argparser.add_argument('--tags_per_movie', type=int, default=10, help="tags per movie")
     argparser.add_argument('--min_tag_score', type=float, default=0.85, help="min tag score")
-    argparser.add_argument('--min_tag_freq', type=int, default=5, help="min tag freq")
-    argparser.add_argument('--n_values_per_field', type=int, default=10, help="number of values per field")
+    argparser.add_argument('--min_tag_freq', type=int, default=20, help="min tag freq")
+    argparser.add_argument('--user_his_min_freq', type=int, default=5, help="min valid tag / cate freq in one user's history")
+    argparser.add_argument('--n_values_per_field', type=int, default=100, help="number of values per field")
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
+    argparser.add_argument('--n_neg', type=int, default=5, help="number of negative target per positive")
+    argparser.add_argument('--n_neg_target', type=int, default=20, help="number of tags per negative target")
     argparser.add_argument('--prepare_tfrecords', default=1, type=int, help="whether to prepare tfrecords, need be set to 1 for first run.")
 
     args = argparser.parse_args()
 
     return args
+
+
+def read_tag_name(filepath):
+    tag_name = {}
+    with open(filepath, "r") as f:
+        f.readline()
+        for line in f.readlines():
+            line = line[:-1]
+            splitted = line.split(",")
+            tag_name[int(splitted[0])] = splitted[1]
+    
+    return tag_name
 
 
 def extract_tags(tag_scores, movie_tag_rel, last_movie_id, tags_per_movie, min_tag_score):
@@ -126,7 +144,7 @@ def extract_movie_cate_relation(filepath):
     return movie_cate_rel, cate_encoder, cate_decoder
 
 
-def extract_user_behaviors(ratings_filepath, min_movies_per_user):
+def extract_user_behaviors(ratings_filepath, args):
     user_behaviors = {}
     
     with open(ratings_filepath, "r") as f:
@@ -141,11 +159,16 @@ def extract_user_behaviors(ratings_filepath, min_movies_per_user):
                 user_behaviors[user_id].append((movie_id, 0, timestamp))
             elif rating >= 3.5:
                 user_behaviors[user_id].append((movie_id, 1, timestamp))
-    
-    # filter out users that has too little movies
-    invalid_users = set([x[0] for x in user_behaviors.items() if len(x[1]) < min_movies_per_user])
 
-    return {x[0]: x[1] for x in user_behaviors.items() if x[0] not in invalid_users}
+    # filter out users that has too little or too much movies
+    invalid_users = set([x[0] for x in user_behaviors.items() if len(x[1]) < args.min_movies_per_user or len(x[1]) > args.max_movies_per_user])
+    _user_behaviors = {}
+    for user_id, behaviors in user_behaviors.items():
+        seed = random.uniform(0, 1)
+        if seed < args.user_frac and user_id not in invalid_users:
+            _user_behaviors[user_id] = behaviors
+
+    return _user_behaviors
 
 
 def extract_pos_tags_cates(movie_id, label, pos_tags, pos_cates, movie_tag_rel, movie_cate_rel):
@@ -180,55 +203,91 @@ def pad_or_cut(values, pad_value, length):
         return values
 
 
-def build_user_samples_mp(ratings_filepath, movie_tag_rel, movie_cate_rel, num_workers, portion, max_user_samples, min_movies_per_user, n_values_per_field, pad_value):
-    user_behaviors = extract_user_behaviors(ratings_filepath, min_movies_per_user)
+def build_user_samples_mp(ratings_filepath, all_tags, movie_tag_rel, movie_cate_rel, num_workers, args):
+    user_behaviors = extract_user_behaviors(ratings_filepath, args)
     with multiprocessing.Pool(num_workers) as pool:
         all_samples = pool.starmap(
             build_user_samples, 
             zip(
                 user_behaviors.keys(), 
+                repeat(all_tags),
                 repeat(movie_tag_rel), 
                 repeat(movie_cate_rel), 
                 user_behaviors.values(), 
-                repeat(portion), 
-                repeat(max_user_samples), 
-                repeat(n_values_per_field), 
-                repeat(pad_value))
+                repeat(args.user_his_min_freq), 
+                repeat(args.n_values_per_field), 
+                repeat(args.max_user_samples), 
+                repeat(args.n_neg), 
+                repeat(args.tags_per_movie)
+            )
         )
     
     return all_samples
 
 
-def build_user_samples(user_id, movie_tag_rel, movie_cate_rel, user_behavior, portion, max_user_samples, n_values_per_field, pad_value):
+def filter_low_freq(all, min_freq):
+    value_freq = {}
+    for value in all:
+        try:
+            value_freq[value] += 1
+        except KeyError:
+            value_freq[value] = 1
+
+    invalid_value = set([x[0] for x in value_freq.items() if x[1] <= min_freq])
+
+    return [x for x in all if x not in invalid_value]
+
+
+def build_user_samples(
+        user_id, 
+        all_tags, 
+        movie_tag_rel, 
+        movie_cate_rel, 
+        user_behavior, 
+        user_his_min_freq, 
+        n_values_per_field, 
+        max_user_samples, 
+        n_neg, 
+        tags_per_movie
+    ):
     if not user_behavior:
         return []
+
     user_behavior = sorted(user_behavior, key=lambda x: x[2])
     # as decribed in the paper, use top 80% records to build fields
-    split_idx = int(len(user_behavior) * portion)
+    split_idx = int(len(user_behavior) * 0.8)
     history, future = user_behavior[:split_idx], user_behavior[split_idx:]
+
     # extract history postive tags and cates
     his_pos_tags, his_pos_cates = [], []
     for movie_id, label, timestamp in history:
         extract_pos_tags_cates(movie_id, label, his_pos_tags, his_pos_cates, movie_tag_rel, movie_cate_rel)
+
+    # filter out tags and cates with low freq
+    his_pos_tags = filter_low_freq(his_pos_tags, user_his_min_freq)
+    his_pos_cates = filter_low_freq(his_pos_cates, user_his_min_freq)
+
+    his_pos_tags = pad_or_cut(his_pos_tags, 0, n_values_per_field)
+    his_pos_cates = pad_or_cut(his_pos_cates, 0, n_values_per_field)
+
     # as described by the paper, restrict max samples for each user
     if len(future) > max_user_samples:
         future = random.choices(future, k=max_user_samples)
 
+    # extract label tags from future
     tags_labels = []
     for movie_id, label, timestamp in future:
         # one movie produce (tags, label)
         extract_tags_labels(movie_id, label, tags_labels, movie_tag_rel)
 
-    user_samples = [
-        [
-            user_id,
-            pad_or_cut(his_pos_tags, pad_value, n_values_per_field), 
-            pad_or_cut(his_pos_cates, pad_value, n_values_per_field), 
-            target_tags_label[0],
-            target_tags_label[1]
-        ]
-        for target_tags_label in tags_labels
-    ]
+    user_samples = []
+    for target_tags, target_label in tags_labels:
+        user_samples.append([user_id, his_pos_tags, his_pos_cates, target_tags, target_label])
+        if target_label == 1:
+            # negative sampling
+            for _ in range(n_neg):
+                neg_tags = random.choices(all_tags, k=tags_per_movie)
+                user_samples.append([user_id, his_pos_tags, his_pos_cates, neg_tags, 0])
 
     return user_samples
 
