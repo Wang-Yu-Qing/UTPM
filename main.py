@@ -1,6 +1,6 @@
-import os
-#os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+import pickle
 import tensorflow as tf
+
 from utils import *
 from model import UTPM
 
@@ -61,7 +61,26 @@ if __name__ == "__main__":
     for encoded_tag_id, tag_embed in enumerate(model.query_tags_embeds()):
         tags_embeds[tag_decoder[encoded_tag_id]] = tag_embed
 
-    # TODO check user history and future tags similarity
     users_embeds = evaluate(model, test_dataset, tags_embeds, args.U)
-    tsne(np.array(list(tags_embeds.values())), "tags.png")
-    tsne(users_embeds, "users.png")
+
+    tsne(np.array(list(tags_embeds.values())), 'tags.png')
+    tsne(users_embeds, 'users.png')
+
+    #tag_names = read_tag_name('data/ml-20m/genome-tags.csv')
+    #tag_vecs, idx2name = [], {}
+    #for idx, (tag_raw_id, tag_vec) in enumerate(tags_embeds.items()):
+    #    idx2name[idx] =  tag_names[tag_raw_id]
+    #    tag_vecs.append(tag_vec)
+    #tag_vecs = np.array(tag_vecs)
+    
+    #search_index = faiss.IndexFlatIP(args.U)
+    #search_index.add(tag_vecs)
+
+    #all_dis, all_neigh = search_index.search(tag_vecs, k=5)
+    #for idx, (dis, neigh) in enumerate(zip(all_dis, all_neigh)):
+    #    target_tag = idx2name[idx]
+    #    print("{} -->".format(target_tag))
+    #    for _dis, idx in zip(dis, neigh):
+    #        print((idx2name[idx], _dis), end=', ')
+    #    print('\n\n')
+

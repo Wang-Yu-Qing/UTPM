@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 def parse_args():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--epochs', type=int, default=20)
-    argparser.add_argument('--batch_size', type=int, default=64)
+    argparser.add_argument('--batch_size', type=int, default=256)
     argparser.add_argument('--E', type=int, default=16)
     argparser.add_argument('--T', type=int, default=8)
     argparser.add_argument('--U', type=int, default=16)
@@ -23,13 +23,13 @@ def parse_args():
     argparser.add_argument('--pad_value', type=int, default=0)
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
-    argparser.add_argument('--user_frac', default=0.5, type=int, help="fraction of users to be used in training and testing")
-    argparser.add_argument('--max_user_samples', type=int, default=20, help="max labels per user")
-    argparser.add_argument('--min_movies_per_user', type=int, default=60, help="min movies for a valid user")
+    argparser.add_argument('--user_frac', default=1, type=int, help="fraction of users to be used in training and testing")
+    argparser.add_argument('--max_user_samples', type=int, default=30, help="max labels per user")
+    argparser.add_argument('--min_movies_per_user', type=int, default=10, help="min movies for a valid user")
     argparser.add_argument('--max_movies_per_user', type=int, default=150, help="max movies for a valid user")
     argparser.add_argument('--tags_per_movie', type=int, default=10, help="tags per movie")
-    argparser.add_argument('--min_tag_score', type=float, default=0.85, help="min tag score")
-    argparser.add_argument('--min_tag_freq', type=int, default=20, help="min tag freq")
+    argparser.add_argument('--min_tag_score', type=float, default=0.7, help="min tag score")
+    argparser.add_argument('--min_tag_freq', type=int, default=10, help="min tag freq")
     argparser.add_argument('--user_his_min_freq', type=int, default=5, help="min valid tag / cate freq in one user's history")
     argparser.add_argument('--n_values_per_field', type=int, default=100, help="number of values per field")
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
@@ -43,7 +43,7 @@ def parse_args():
 
 
 def read_tag_name(filepath):
-    tag_name = {}
+    tag_name = {'<pad>': '<pad>'}
     with open(filepath, "r") as f:
         f.readline()
         for line in f.readlines():
@@ -397,7 +397,7 @@ def evaluate(model, test_dataset, tag_embeds, U):
 
         _user_embeds = model.forward(pos_tag, pos_cate)
 
-        for user_id, target_movie_tags, label, user_embed in zip(user_ids, target_movie_tags, labels, _user_embeds):
+        for user_id, _pos_tag, _target_movie_tags, label, user_embed in zip(user_ids, pos_tag, target_movie_tags, labels, _user_embeds):
             # only evaluate on user true interest
             if label.numpy() == 1:
                 user_id = user_id.numpy()
@@ -406,7 +406,7 @@ def evaluate(model, test_dataset, tag_embeds, U):
                 if user_id not in user_true_tags:
                     user_true_tags[user_id] = set()
 
-                true_tags = target_movie_tags.numpy()
+                true_tags = set(_target_movie_tags.numpy().tolist() + _pos_tag.numpy().tolist())
                 for tag in true_tags:
                     user_true_tags[user_id].add(tag)
 
@@ -417,7 +417,7 @@ def evaluate(model, test_dataset, tag_embeds, U):
         user_vecs.append(vec)
     user_vecs = np.array(user_vecs)
 
-    for K in [1, 2, 3]:
+    for K in [1, 2, 3, 4, 5]:
         dis, neigh = tag_embeds_index.search(user_vecs, K)
         user_true_tags_pred = {}
         for user_idx, _neigh in enumerate(neigh):
@@ -449,5 +449,5 @@ def precision_at_K(user_true_tags_pred, user_true_tags, K):
 def tsne(embeds, filename):
     embeds = TSNE(n_components=2).fit_transform(embeds)
     plt.clf()
-    plt.scatter([x[0] for x in embeds], [x[1] for x in embeds])
+    plt.scatter([x[0] for x in embeds], [x[1] for x in embeds], alpha=0.7)
     plt.savefig(filename)
