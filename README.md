@@ -23,7 +23,7 @@ james bond -->
 
 ## Tag & user embedding distribution
 Use t-sne dimension reduction method to reduce the trained tag and user embeddings into 2D space, below is the tags' distribution.
-![图片](pics/tags.png)
+![tags](pics/tags.png)
 
 ## Precision@K (Currently cannot reproduce the result in paper.)
 * precision@1: 6.95%
