@@ -22,8 +22,8 @@ james bond -->
 ```
 
 ## Tag & user embedding distribution
-Use t-sne dimension reduction method to reduce the trained tag and user embeddings into 2D space, below is the distribution.
-
+Use t-sne dimension reduction method to reduce the trained tag and user embeddings into 2D space, below is the tags' distribution.
+![图片](pics/tags.png)
 
 ## Precision@K (Currently cannot reproduce the result in paper.)
 * precision@1: 6.95%
@@ -31,7 +31,7 @@ Use t-sne dimension reduction method to reduce the trained tag and user embeddin
 * precision@3: 4.10%
 
 ## Run the model
-Run with default config `python main.py`
+Create `pics` folder for saving t-sne embedding distribution pics. Run with default config `python main.py`
 
 If you don't have GPU but want to see the result quickly, it is recommended to use a small (let's say 0.3) `user_frac` to make a sample of full users.
 

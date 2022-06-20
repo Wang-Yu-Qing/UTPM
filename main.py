@@ -63,10 +63,16 @@ if __name__ == "__main__":
 
     users_embeds = evaluate(model, test_dataset, tags_embeds, args.U)
 
-    tsne(np.array(list(tags_embeds.values())), 'tags.png')
-    tsne(users_embeds, 'users.png')
+    tag_names = read_tag_name('data/ml-20m/genome-tags.csv')
+    _tag_names, tag_vecs = [], []
+    for tag_id, tag_vec in tags_embeds.items():
+        _tag_names.append(tag_names[tag_id])
+        tag_vecs.append(tag_vec)
+    tsne(np.array(tag_vecs), 'pics/tags.png', names=_tag_names)
+    tsne(users_embeds, 'pics/users.png')
 
-    #tag_names = read_tag_name('data/ml-20m/genome-tags.csv')
+    # Print out tag similarity search result
+    # NOTE: these may print out a lot to the terminal
     #tag_vecs, idx2name = [], {}
     #for idx, (tag_raw_id, tag_vec) in enumerate(tags_embeds.items()):
     #    idx2name[idx] =  tag_names[tag_raw_id]

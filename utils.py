@@ -23,13 +23,13 @@ def parse_args():
     argparser.add_argument('--pad_value', type=int, default=0)
     # turn on this will increase forward function's time complexity a lot
     argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
-    argparser.add_argument('--user_frac', default=1, type=int, help="fraction of users to be used in training and testing")
+    argparser.add_argument('--user_frac', default=0.5, type=int, help="fraction of users to be used in training and testing")
     argparser.add_argument('--max_user_samples', type=int, default=30, help="max labels per user")
-    argparser.add_argument('--min_movies_per_user', type=int, default=10, help="min movies for a valid user")
+    argparser.add_argument('--min_movies_per_user', type=int, default=50, help="min movies for a valid user")
     argparser.add_argument('--max_movies_per_user', type=int, default=150, help="max movies for a valid user")
     argparser.add_argument('--tags_per_movie', type=int, default=10, help="tags per movie")
     argparser.add_argument('--min_tag_score', type=float, default=0.7, help="min tag score")
-    argparser.add_argument('--min_tag_freq', type=int, default=10, help="min tag freq")
+    argparser.add_argument('--min_tag_freq', type=int, default=50, help="min tag freq")
     argparser.add_argument('--user_his_min_freq', type=int, default=5, help="min valid tag / cate freq in one user's history")
     argparser.add_argument('--n_values_per_field', type=int, default=100, help="number of values per field")
     argparser.add_argument('--n_list_fea', type=int, default=2, help="number of list features")
@@ -446,8 +446,11 @@ def precision_at_K(user_true_tags_pred, user_true_tags, K):
     return res / n_valid_user
 
 
-def tsne(embeds, filename):
+def tsne(embeds, filename, names=None):
     embeds = TSNE(n_components=2).fit_transform(embeds)
     plt.clf()
     plt.scatter([x[0] for x in embeds], [x[1] for x in embeds], alpha=0.7)
-    plt.savefig(filename)
+    if names:
+        for i, name in enumerate(names):
+            plt.annotate(name, (embeds[i][0], embeds[i][1]), size=3)
+    plt.savefig(filename, dpi=500)
