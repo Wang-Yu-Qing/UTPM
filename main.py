@@ -1,5 +1,9 @@
-import pickle
 import tensorflow as tf
+
+
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
 
 from utils import *
 from model import UTPM
@@ -53,8 +57,8 @@ if __name__ == "__main__":
     )
     
     model.train(train_dataset)
-    model.save_weights("saved_model.pickle")
-    model.load_weights("saved_model.pickle")
+    save(model, 'model.pickle')
+    model = load('model.pickle')
 
     # tag raw id -> embedding
     tags_embeds = {}
@@ -73,20 +77,19 @@ if __name__ == "__main__":
 
     # Print out tag similarity search result
     # NOTE: these may print out a lot to the terminal
-    #tag_vecs, idx2name = [], {}
-    #for idx, (tag_raw_id, tag_vec) in enumerate(tags_embeds.items()):
-    #    idx2name[idx] =  tag_names[tag_raw_id]
-    #    tag_vecs.append(tag_vec)
-    #tag_vecs = np.array(tag_vecs)
+    tag_vecs, idx2name = [], {}
+    for idx, (tag_raw_id, tag_vec) in enumerate(tags_embeds.items()):
+        idx2name[idx] =  tag_names[tag_raw_id]
+        tag_vecs.append(tag_vec)
+    tag_vecs = np.array(tag_vecs)
     
-    #search_index = faiss.IndexFlatIP(args.U)
-    #search_index.add(tag_vecs)
+    search_index = faiss.IndexFlatIP(args.U)
+    search_index.add(tag_vecs)
 
-    #all_dis, all_neigh = search_index.search(tag_vecs, k=5)
-    #for idx, (dis, neigh) in enumerate(zip(all_dis, all_neigh)):
-    #    target_tag = idx2name[idx]
-    #    print("{} -->".format(target_tag))
-    #    for _dis, idx in zip(dis, neigh):
-    #        print((idx2name[idx], _dis), end=', ')
-    #    print('\n\n')
+    all_dis, all_neigh = search_index.search(tag_vecs, k=5)
+    for idx, (dis, neigh) in enumerate(zip(all_dis, all_neigh)):
+        target_tag = idx2name[idx]
+        print("{} -->".format(target_tag))
+        for _dis, idx in zip(dis, neigh):
+            print('\t', idx2name[idx], _dis)
 

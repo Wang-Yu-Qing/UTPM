@@ -36,7 +36,7 @@ class UTPM:
 
         # fc weights
         if self.use_cross:
-            self.fc1 = self.init_trainable_weights([int(2 * E * (2 * E - 1) / 2), D], "fc1")
+            self.fc1 = self.init_trainable_weights([int(E + 2 * E * (2 * E - 1) / 2), D], "fc1")
             self.fc2 = self.init_trainable_weights([D, U], "fc2")
         else:
             self.fc1 = self.init_trainable_weights([2 * E, D], "fc1")
@@ -156,26 +156,26 @@ class UTPM:
         else:
             return tf.squeeze(tf.concat([h0_batch_res, h1_batch_res], axis=2), axis=1)
 
-    def brute_force_cross(self, x_batch, embeds):
+    def brute_force_cross(self, x):
         res = []
-        for i in range(x_batch.shape[1] - 1):
-            for j in range(i + 1, x_batch.shape[1]):
+        for i in range(x.shape[1] - 1):
+            for j in range(i + 1, x.shape[1]):
                 # (2, C)
-                _embeds = tf.nn.embedding_lookup(self.all_embeds["cross"], [i, j])
+                embeds = tf.nn.embedding_lookup(self.all_embeds["cross"], [i, j])
                 # (1, )
-                vi_vj = tf.tensordot(_embeds[0], _embeds[1], axes=1)
+                vi_vj = tf.tensordot(embeds[0], embeds[1], axes=1)
                 # (batch_size, )
-                batch_xi_xj = x_batch[:, i] * x_batch[:, j]
+                xi_xj = x[:, i] * x[:, j]
                 # (batch_size, )
-                res.append(batch_xi_xj * vi_vj)
+                res.append(xi_xj * vi_vj)
                 
-        # (batch_size, 0.5 * x_dim * (x_dim - 1))
-        return tf.stack(res, axis=1)
+        # (batch_size, 2 * E + 0.5 * 2 * E * (2 * E - 1))
+        return tf.concat([x, tf.stack(res, axis=1)], axis=1)
 
     def forward(self, pos_tags, pos_cates):
         x = self.attention_forward(pos_tags, pos_cates)
         if self.use_cross:
-            x = self.brute_force_cross(x, self.all_embeds["cross"])
+            x = self.brute_force_cross(x)
         x = tf.nn.relu(tf.matmul(x, self.fc1))
         batch_user_embeds = tf.nn.relu(tf.matmul(x, self.fc2))
         batch_user_embeds = tf.math.l2_normalize(batch_user_embeds, axis=1)
@@ -185,7 +185,7 @@ class UTPM:
     def forward_with_attention_details(self, batch_samples):
         x, attention_weights = self.attention_forward(batch_samples, return_weights=True)
         if self.use_cross:
-            x = self.brute_force_cross(x, self.all_embeds["cross"])
+            x = self.brute_force_cross(x)
         x = tf.nn.relu(tf.matmul(x, self.fc1))
         batch_user_embeds = tf.nn.relu(tf.matmul(x, self.fc2))
 
