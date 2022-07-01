@@ -1,6 +1,7 @@
 import faiss
 import random
 import argparse
+import pickle
 import numpy as np
 import tensorflow as tf
 import multiprocessing
@@ -22,7 +23,7 @@ def parse_args():
     argparser.add_argument('--log_step', type=int, default=500)
     argparser.add_argument('--pad_value', type=int, default=0)
     # turn on this will increase forward function's time complexity a lot
-    argparser.add_argument('--use_cross', type=bool, default=False, help="whether to use cross layer")
+    argparser.add_argument('--use_cross', type=int, default=0, help="whether to use cross layer")
     argparser.add_argument('--user_frac', default=0.5, type=int, help="fraction of users to be used in training and testing")
     argparser.add_argument('--max_user_samples', type=int, default=30, help="max labels per user")
     argparser.add_argument('--min_movies_per_user', type=int, default=50, help="min movies for a valid user")
@@ -368,7 +369,17 @@ def read_tf_records(batch_size):
     test_dataset = tf.data.TFRecordDataset("data/test_samples.tfrecords").map(decode_one_tfrecord).batch(batch_size)
 
     return train_dataset, test_dataset
-    
+
+
+def save(obj, filepath):
+    with open(filepath, "wb") as f:
+        f.write(pickle.dumps(obj))
+
+
+def load(filepath):
+    with open(filepath, "rb") as f:
+        return pickle.loads(f.read())
+
 
 def evaluate(model, test_dataset, tag_embeds, U):
     # idx -> raw tag id
@@ -453,4 +464,4 @@ def tsne(embeds, filename, names=None):
     if names:
         for i, name in enumerate(names):
             plt.annotate(name, (embeds[i][0], embeds[i][1]), size=3)
-    plt.savefig(filename, dpi=500)
+    plt.savefig(filename, dpi=250)
