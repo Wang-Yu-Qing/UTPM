@@ -26,9 +26,10 @@ Use t-sne dimension reduction method to reduce the trained tag and user embeddin
 ![tags](pics/tags.png)
 
 ## Precision@K (Currently cannot reproduce the result in paper.)
-* precision@1: 6.95%
-* precision@2: 5.28%
-* precision@3: 4.10%
+With `user_frac` set to 0.5:
+* precision@1: 14.87%
+* precision@2: 7.46%
+* precision@3: 6.67%
 
 ## Run the model
 Create `pics` folder for saving t-sne embedding distribution pics. Run with default config `python main.py`
