@@ -1,4 +1,3 @@
-import pickle
 import time as time
 import tensorflow as tf
 
@@ -24,10 +23,16 @@ class UTPM:
         # embedding op for padding value lookup
         self.reset_pad_embedding()
 
-        # attention weights for tags and cates
-        self.Q = self.init_trainable_weights([2, T, 1], "Q")
-        self.W_list_fea = self.init_trainable_weights([2, 2, E, T], "W")
-        self.B_list_fea = self.init_trainable_weights([2, 2, T], "B")
+        # heads query weights for all fields' features
+        self.Q = self.init_trainable_weights([2, T, 1], "Q") # (n_head, T, 1)
+        # transform weights & bias for each field
+        self.W_fields = self.init_trainable_weights([2, 2, E, T], "W")  # (n_head, n_list_field, E, T)
+        # in the paper, bias is shared across heads, we just use different bias for each head here.
+        self.B_fields = self.init_trainable_weights([2, 2, T], "B") # (n_head, n_list_field, T)
+
+        # transform weights & bias for final attention merge (merge fields embedding)
+        self.W_final = self.init_trainable_weights([2, E, T], "FW")
+        self.B_final = self.init_trainable_weights([2, T], "FB")
 
         # fc weights
         if self.use_cross:
@@ -37,10 +42,18 @@ class UTPM:
             self.fc1 = self.init_trainable_weights([2 * E, D], "fc1")
             self.fc2 = self.init_trainable_weights([D, U], "fc2")
         
-        self.trainable_weights = [self.all_embeds["tag"], 
-                                  self.all_embeds["cate"], 
-                                  self.all_embeds["tag_label"]] + \
-                                 [self.Q, self.W_list_fea, self.B_list_fea, self.fc1, self.fc2]
+        self.trainable_weights = [
+            self.all_embeds["tag"], 
+            self.all_embeds["cate"], 
+            self.all_embeds["tag_label"],
+            self.Q, 
+            self.W_fields, 
+            self.B_fields, 
+            self.W_final, 
+            self.B_final, 
+            self.fc1, 
+            self.fc2
+        ]
         
         self.opt = tf.optimizers.Adam(learning_rate=lr)
          
@@ -63,11 +76,13 @@ class UTPM:
 
     def head_attention(self, embeds, head_idx, Q, W, B, return_weights=False):
         """
+            Basic attention merge operation defined in paper's equation (1)
+
             @embeds: (batch_size, n, E), batch of all t_i
             @head_idx: scalar
             @Q: (n_head, T, 1)
-            @W: (n_head, E, T)
-            @B: (n_head, T)
+            @W: W (n_head, E, T)
+            @B: B (n_head, T)
         """
         W_head = W[head_idx] # (E, T)
         B_head = B[head_idx] # (T, )
@@ -79,7 +94,7 @@ class UTPM:
         relued = tf.expand_dims(tf.nn.relu(add_B), 2) # (batch_size, n, 1, T)
         matmul_Q = tf.squeeze(tf.matmul(relued, Q_head), axis=[2, 3]) # (batch_size, n)
         alphas = tf.expand_dims(tf.nn.softmax(matmul_Q), 1) # (batch_size, 1, n)
-        # no squeeze for further list fea merged embedding concat with single fea embedding
+        # no squeeze for further list fields merged embedding concat with single fea embedding
         res = tf.matmul(alphas, embeds) # (batch_size, 1, E)
         
         if return_weights:
@@ -87,40 +102,53 @@ class UTPM:
         else:
             return res
     
+    def merge_features(self, i, fea_embeds, attention_weights=None):
+        """
+            Merge feature embedding from the given list field into field embedding
+            @i: list field idx
+            @fea_embeds: features embedding of the target list field, (batch_size, n_fea, E)
+        """
+        # get target list field's W and B
+        # (n_head, E, T)
+        W = self.W_fields[:, i, :, :]
+        # (n_head, T)
+        B = self.B_fields[:, i, :]
+        
+        if attention_weights is not None:
+            h0_fea_merged, h0_weights = self.head_attention(fea_embeds, 0, self.Q, W, B, True) # (batch_size, 1, E)
+            h1_fea_merged, h1_weights = self.head_attention(fea_embeds, 1, self.Q, W, B, True) # (batch_size, 1, E)
+            attention_weights[str(i) + "_h0"] = h0_weights
+            attention_weights[str(i) + "_h1"] = h1_weights
+        else:
+            # merge list feature embeds to produce one embedding for the list feature
+            h0_fea_merged = self.head_attention(fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
+            h1_fea_merged = self.head_attention(fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
+        
+        return tf.squeeze(h0_fea_merged, axis=1), tf.squeeze(h1_fea_merged, axis=1)
+
     def attention_forward(self, pos_tags, pos_cates, return_weights=False):
-        batch_list_fea_embeds = {}
+        list_fields_embeds = {}
         # query embeddings
-        batch_list_fea_embeds["pos_tag"] = tf.nn.embedding_lookup(self.all_embeds["tag"], pos_tags)
-        batch_list_fea_embeds["pos_cate"] = tf.nn.embedding_lookup(self.all_embeds["cate"], pos_cates)
+        list_fields_embeds["pos_tag"] = tf.nn.embedding_lookup(self.all_embeds["tag"], pos_tags)
+        list_fields_embeds["pos_cate"] = tf.nn.embedding_lookup(self.all_embeds["cate"], pos_cates)
         
-        h0_batch_fea_embeds, h1_batch_fea_embeds,  = [], []
+        h0_fields_embeds, h1_fields_embeds = [], []
         attention_weights = {}
-        # get list fea's W and B, 0 for list features
-        for i, (list_fea_name, _batch_list_fea_embeds) in enumerate(batch_list_fea_embeds.items()):
-            # (n_head, batch_size, list_length, E, T)
-            W = self.W_list_fea[:, i, :, :]
-            # (n_head, batch_size, list_length, T)
-            B = self.B_list_fea[:, i, :]
-            
+        # First merge: merge each list field's feature value embeddings into each list field's embedding.
+        for i, (field_name, fea_embeds) in enumerate(list_fields_embeds.items()):
             if return_weights:
-                h0_batch_fea_merged, h0_weights = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B, True) # (batch_size, 1, E)
-                h1_batch_fea_merged, h1_weights = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B, True) # (batch_size, 1, E)
-                attention_weights[list_fea_name + "_h0"] = h0_weights
-                attention_weights[list_fea_name + "_h1"] = h1_weights
+                h0_fea_merged, h1_fea_merged = self.merge_features(i, fea_embeds, attention_weights)
             else:
-                # merge list feature embeds to produce one embedding for the list feature
-                h0_batch_fea_merged = self.head_attention(_batch_list_fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
-                h1_batch_fea_merged = self.head_attention(_batch_list_fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
+                h0_fea_merged, h1_fea_merged = self.merge_features(i, fea_embeds)
+            h0_fields_embeds.append(h0_fea_merged)
+            h1_fields_embeds.append(h1_fea_merged)
 
-            h0_batch_fea_embeds.append(tf.squeeze(h0_batch_fea_merged, axis=1))
-            h1_batch_fea_embeds.append(tf.squeeze(h1_batch_fea_merged, axis=1))
-        
-        h0_batch_fea_embeds = tf.stack(h0_batch_fea_embeds, axis=1) # (batch_size, n_fea, E)
-        h1_batch_fea_embeds = tf.stack(h1_batch_fea_embeds, axis=1) # (batch_size, n_fea, E)
+        h0_fields_embeds = tf.stack(h0_fields_embeds, axis=1) # (batch_size, n_fea, E)
+        h1_fields_embeds = tf.stack(h1_fields_embeds, axis=1) # (batch_size, n_fea, E)
 
-        # merge all feature embeds to produce final embedding
-        h0_batch_res = self.head_attention(h0_batch_fea_embeds, 0, self.Q, W, B) # (batch_size, 1, E)
-        h1_batch_res = self.head_attention(h1_batch_fea_embeds, 1, self.Q, W, B) # (batch_size, 1, E)
+        # Second merge: merge all fields embedding into final embedding
+        h0_batch_res = self.head_attention(h0_fields_embeds, 0, self.Q, self.W_final, self.B_final) # (batch_size, 1, E)
+        h1_batch_res = self.head_attention(h1_fields_embeds, 1, self.Q, self.W_final, self.B_final) # (batch_size, 1, E)
         
         # (batch_size, 2E)
         if return_weights:
@@ -221,22 +249,3 @@ class UTPM:
         """
         return tf.math.l2_normalize(self.all_embeds["tag_label"], axis=1).numpy()
     
-    def save_weights(self, filepath):
-        print("Save model weights to {}".format(filepath))
-        with open(filepath, "wb") as f:
-            f.write(pickle.dumps(self.trainable_weights))
-
-    def load_weights(self, filepath):
-        print("Load model weights from {}".format(filepath))
-        with open(filepath, "rb") as f:
-            weights = pickle.loads(f.read())
-            self.all_embeds = {
-                "tag": weights[0],
-                "cate": weights[1],
-                "tag_label": weights[2],
-            }
-            self.Q = weights[3]
-            self.W_list_fea = weights[4]
-            self.B_list_fea = weights[5]
-            self.fc1 = weights[6]
-            self.fc2 = weights[7]
