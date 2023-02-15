@@ -57,7 +57,9 @@ Use t-sne dimension reduction method to reduce the trained tag and user embeddin
 ![tags](pics/tags.png)
 ![users](pics/users.png)
 
-## Precision@K (Currently cannot reproduce the result in paper.)
+## Precision@K
+Currently **cannot reproduce the result in paper**. I think the paper's data preprocess method (e.g. filter out some long-tail user / movie) is different with mine and this is crutial to the evaluation result. But we cannot find these details in the paper. So the gap still exists.
+
 With `user_frac` set to 0.5:
 * precision@1: 14.87%
 * precision@2: 7.46%
